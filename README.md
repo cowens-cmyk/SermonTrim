@@ -39,6 +39,16 @@ in about 45 s (92 s with a simultaneous full decode check); the copied middle wa
    Out = last word + wait (default 5 s) + fade duration, so the fade starts after the quiet hold.
 Phrase lists and the wait time are editable in Settings (⌘,).
 
+## Also included
+* **Live fade preview** — the player shows the fades (and audio ramps) as you adjust them. ⌘1 / ⌘2 play the start and end.
+* **Waveform** on the timeline, so the silence around "amen" is easy to see.
+* **Copy-vs-re-encode summary** next to Export ("Copies 98.1% as-is · re-encodes 5.6 s"). If a long stretch would have to be
+  re-encoded (a source with no clean keyframes near your cuts) you get a warning first instead of a surprise.
+* **Undo/redo (⌘Z)** for In/Out changes, and your usual fade settings are remembered.
+* **Batch Auto-Trim… (⌥⌘B)**: queue several files; each is transcribed, detected, and exported next to the original.
+  Results list the detected In/Out with *Open in Editor* for any file you want to check. CLI: `smarttrim batch <files>`.
+* H.264 and HEVC (8-bit and 10-bit, closed-GOP) sources. Colour tags are carried through.
+
 ## Keys
 Space play/pause · I / O set In / Out · ← → frame step · , . ±1 s · **⌘B Blade** at playhead ([ cut before, ] cut after) · ⌘E export · ⌘O open
 

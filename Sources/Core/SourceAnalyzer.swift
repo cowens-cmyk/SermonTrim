@@ -125,7 +125,7 @@ public final class AssetKeyframeProvider: KeyframeProvider, @unchecked Sendable 
         let request = AVSampleBufferRequest(start: cursor)
         request.maxSampleCount = 1
         request.direction = .forward
-        guard let sb = try? generator.createSampleBuffer(for: request),
+        guard let sb = try? generator.makeSampleBuffer(for: request),
               let block = CMSampleBufferGetDataBuffer(sb),
               let fd = CMSampleBufferGetFormatDescription(sb) else { return false }
         return NALScanner.containsIDR(block: block, formatDescription: fd, isHEVC: info.isHEVC)

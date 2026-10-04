@@ -20,9 +20,26 @@ struct TimelineBar: View {
                     .frame(height: 40)
                     .offset(y: 18)
 
+                // Waveform
+                if !model.waveform.isEmpty {
+                    Canvas { ctx, size in
+                        let n = model.waveform.count
+                        let step = size.width / CGFloat(n)
+                        var path = Path()
+                        for (i, v) in model.waveform.enumerated() {
+                            let h = max(1, CGFloat(v) * (size.height - 8))
+                            path.addRect(CGRect(x: CGFloat(i) * step, y: (size.height - h) / 2, width: max(1, step * 0.8), height: h))
+                        }
+                        ctx.fill(path, with: .color(.secondary.opacity(0.55)))
+                    }
+                    .frame(width: w, height: 40)
+                    .offset(y: 18)
+                    .allowsHitTesting(false)
+                }
+
                 // Kept region
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.35))
+                    .fill(Color.accentColor.opacity(0.22))
                     .frame(width: max(2, x(model.outTime) - x(model.inTime)), height: 40)
                     .offset(x: x(model.inTime), y: 18)
 

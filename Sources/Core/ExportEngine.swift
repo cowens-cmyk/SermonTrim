@@ -30,6 +30,32 @@ public final class ExportEngine: @unchecked Sendable {
         return url
     }
 
+    /// What an export would do, without doing it: how much is copied vs. re-encoded.
+    public struct Preflight: Sendable {
+        public var plan: ExportPlan
+        public var totalSeconds: Double
+        public var reencodedSeconds: Double
+        public var copiedSeconds: Double { max(0, totalSeconds - reencodedSeconds) }
+        /// True when a long stretch would have to be re-encoded (no clean keyframes near the cuts).
+        public var isHeavy: Bool { reencodedSeconds > 60 && reencodedSeconds > totalSeconds * 0.1 }
+        public var summary: String {
+            if reencodedSeconds < 0.05 { return "Copies everything as-is" }
+            return String(format: "Copies %.1f%% as-is · re-encodes %.1f s", 100 * copiedSeconds / max(totalSeconds, 0.001), reencodedSeconds)
+        }
+    }
+
+    public static func preflight(source: URL, spec: TrimSpec) async throws -> Preflight {
+        let asset = AVURLAsset(url: source, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let info = try await SourceAnalyzer.analyze(asset: asset)
+        return try preflight(asset: asset, info: info, spec: spec)
+    }
+
+    public static func preflight(asset: AVAsset, info: VideoSourceInfo, spec: TrimSpec) throws -> Preflight {
+        let keyframes = AssetKeyframeProvider(asset: asset, info: info)
+        let plan = try ExportPlan.make(spec: spec, trackEnd: info.timeRange.end, frameDuration: info.frameDuration, keyframes: keyframes)
+        return Preflight(plan: plan, totalSeconds: CMTimeSubtract(plan.endTime, plan.firstFrame).seconds_, reencodedSeconds: plan.reencodedDuration)
+    }
+
     public func export(source: URL, output: URL, spec: TrimSpec, progress: @escaping ProgressHandler) async throws -> Result {
         var log: [String] = []
         let asset = AVURLAsset(url: source, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])

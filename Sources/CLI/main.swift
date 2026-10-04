@@ -8,6 +8,24 @@ func usage() -> Never {
     exit(2)
 }
 var args = Array(CommandLine.arguments.dropFirst())
+if args.first == "batch", args.count >= 2 {
+    Task { @MainActor in
+        let batch = BatchModel()
+        batch.add(args.dropFirst().map { URL(fileURLWithPath: $0) })
+        batch.start(startFade: Transition(kind: .fadeBlack, duration: 0.5), endFade: Transition(kind: .fadeBlack, duration: 3), tail: 5, markerSettings: MarkerSettings())
+        var last = ""
+        while batch.running || batch.items.contains(where: { if case .waiting = $0.status { return true }; return false }) {
+            try? await Task.sleep(for: .seconds(2))
+            let line = batch.items.map { "\($0.url.lastPathComponent): \($0.status)" }.joined(separator: " | ")
+            if line != last { last = line; print(line.prefix(220)) }
+        }
+        for i in batch.items {
+            print("RESULT \(i.url.lastPathComponent) in=\(i.inTime.map { formatTimecode($0, frameRate: 60) } ?? "-") out=\(i.outTime.map { formatTimecode($0, frameRate: 60) } ?? "-") \(i.summary) status=\(i.status)")
+        }
+        exit(0)
+    }
+    RunLoop.main.run()
+}
 if args.first == "detect", args.count >= 2 {
     let file = URL(fileURLWithPath: args[1])
     Task {

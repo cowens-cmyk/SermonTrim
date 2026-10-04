@@ -127,7 +127,10 @@ struct ExportButton: View {
         HStack(spacing: 12) {
             switch model.exportState {
             case .idle:
-                EmptyView()
+                if let pf = model.preflight {
+                    Text(pf.summary).font(.footnote).foregroundStyle(pf.isHeavy ? .orange : .secondary)
+                        .help("Everything outside the fades is copied without re-encoding, so the file stays about the same size.")
+                }
             case .running(let stage, let fraction):
                 ProgressView(value: fraction).frame(width: 160)
                 Text(stage).font(.footnote).foregroundStyle(.secondary)

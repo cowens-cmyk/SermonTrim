@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         @Bindable var model = model
@@ -39,7 +40,9 @@ struct ContentView: View {
         .focusable()
         .focused($focused)
         .focusEffectDisabled()
-        .onAppear { focused = true }
+        .onAppear { focused = true; model.undoManager = undoManager }
+        .onChange(of: undoManager) { _, new in model.undoManager = new }
+        .sheet(isPresented: $model.showBatch) { BatchView().environment(model) }
         .onKeyPress(.space) { guard model.hasFile else { return .ignored }; model.togglePlay(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "iIoO"), phases: .down) { press in
             guard model.hasFile else { return .ignored }

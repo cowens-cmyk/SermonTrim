@@ -52,6 +52,7 @@ targets:
     sources:
       - Tests
       - Sources/Core
+      - Sources/App/AppModel.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
