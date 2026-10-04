@@ -1,0 +1,65 @@
+name: SermonTrim
+options:
+  bundleIdPrefix: org.hopejc
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  SermonTrim:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/App
+      - Sources/Core
+    info:
+      path: Sources/App/Info.plist
+      properties:
+        CFBundleDisplayName: Sermon Trim
+        LSApplicationCategoryType: public.app-category.video
+        NSHumanReadableCopyright: "Hope Church"
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Video
+            CFBundleTypeRole: Viewer
+            LSItemContentTypes: [public.movie]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.hopejc.SermonTrim
+        PRODUCT_NAME: Sermon Trim
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Sermon Trim transcribes audio on this Mac to suggest where the message starts and ends.
+  smarttrim:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/CLI
+      - Sources/Core
+    settings:
+      base:
+        PRODUCT_NAME: smarttrim
+  SermonTrimTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+      - Sources/Core
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: org.hopejc.SermonTrimTests
+schemes:
+  SermonTrim:
+    build:
+      targets:
+        SermonTrim: all
+        smarttrim: all
+    test:
+      targets: [SermonTrimTests]

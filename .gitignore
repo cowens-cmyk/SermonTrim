@@ -1,0 +1,6 @@
+build/
+DerivedData/
+*.xcodeproj/
+Sermon Trim.app
+.DS_Store
+xcuserdata/
