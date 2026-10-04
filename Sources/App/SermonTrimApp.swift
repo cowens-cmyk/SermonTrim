@@ -10,10 +10,17 @@ struct SermonTrimApp: App {
                 .environment(model)
                 .frame(minWidth: 1100, minHeight: 700)
                 .onOpenURL { model.open($0) }
+                .task {
+                    try? await Task.sleep(for: .seconds(4))
+                    await Updater.checkAndPrompt(silentIfCurrent: true)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1400, height: 880)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { Task { await Updater.checkAndPrompt(silentIfCurrent: false) } }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Open Video…") { model.openPanel() }.keyboardShortcut("o")
             }

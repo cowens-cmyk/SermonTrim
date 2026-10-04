@@ -45,3 +45,6 @@ Space play/pause · I / O set In / Out · ← → frame step · , . ±1 s · **�
 ## Updating the installed app
 After pulling changes (or when a new version is pushed), run `Scripts/update.sh`. It pulls, rebuilds and replaces
 `/Applications/Sermon Trim.app`. Settings and cached transcripts are kept.
+
+**In the app:** *Sermon Trim ▸ Check for Updates…* compares the installed version with GitHub (it also checks quietly a few
+seconds after launch). *Update Now* opens Terminal, runs `Scripts/update.sh`, and reopens the updated app.

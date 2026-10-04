@@ -22,6 +22,7 @@ targets:
       path: Sources/App/Info.plist
       properties:
         CFBundleDisplayName: Sermon Trim
+        SermonTrimSourcePath: $(SRCROOT)
         LSApplicationCategoryType: public.app-category.video
         NSHumanReadableCopyright: "Hope Church"
         CFBundleDocumentTypes:

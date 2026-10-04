@@ -9,4 +9,7 @@ xcodebuild -project SermonTrim.xcodeproj -scheme SermonTrim -configuration Relea
 pkill -x "Sermon Trim" 2>/dev/null || true
 rm -rf "/Applications/Sermon Trim.app"
 cp -R "build/Build/Products/Release/Sermon Trim.app" "/Applications/Sermon Trim.app"
-echo "Updated. Open Sermon Trim from Applications."
+mkdir -p "$HOME/Library/Application Support/SermonTrim"
+git rev-parse HEAD > "$HOME/Library/Application Support/SermonTrim/installed-commit"
+open "/Applications/Sermon Trim.app"
+echo "Updated to $(git rev-parse --short HEAD)."

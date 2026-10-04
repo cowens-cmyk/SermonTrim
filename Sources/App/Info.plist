@@ -37,5 +37,7 @@
 	<string>public.app-category.video</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Hope Church</string>
+	<key>SermonTrimSourcePath</key>
+	<string>$(SRCROOT)</string>
 </dict>
 </plist>
