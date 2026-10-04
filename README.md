@@ -48,3 +48,6 @@ After pulling changes (or when a new version is pushed), run `Scripts/update.sh`
 
 **In the app:** *Sermon Trim ▸ Check for Updates…* compares the installed version with GitHub (it also checks quietly a few
 seconds after launch). *Update Now* opens Terminal, runs `Scripts/update.sh`, and reopens the updated app.
+
+## Changelog
+- Added in-app update check.
