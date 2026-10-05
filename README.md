@@ -52,7 +52,14 @@ Phrase lists and the wait time are editable in Settings (⌘,).
 ## Keys
 Space play/pause · I / O set In / Out · ← → frame step · , . ±1 s · **⌘B Blade** at playhead ([ cut before, ] cut after) · ⌘E export · ⌘O open
 
-## Updating the installed app
+## Releases (several Macs)
+`Scripts/release.sh 1.1.0 "What changed"` builds the app, makes the DMG, tags the commit, and publishes a GitHub release with
+the DMG attached. On any Mac without the source folder, *Sermon Trim ▸ Check for Updates…* finds the newest release,
+downloads the DMG, verifies its checksum, bundle ID and signature, swaps the app in place and relaunches it.
+The app is ad-hoc signed (not notarized): on a new Mac, right-click ▸ Open once. Updates the app downloads itself don't
+trigger that warning again.
+
+## Updating the installed app (the Mac with the source folder)
 After pulling changes (or when a new version is pushed), run `Scripts/update.sh`. It pulls, rebuilds and replaces
 `/Applications/Sermon Trim.app`. Settings and cached transcripts are kept.
 
