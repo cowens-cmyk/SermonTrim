@@ -26,6 +26,17 @@ if args.first == "batch", args.count >= 2 {
     }
     RunLoop.main.run()
 }
+if args.first == "detect-json", args.count >= 2 {
+    Task {
+        let t = try! JSONDecoder().decode(Transcript.self, from: Data(contentsOf: URL(fileURLWithPath: args[1])))
+        var d = MarkerDetector.heuristicCandidates(transcript: t, settings: MarkerSettings())
+        d = await MarkerDetector.refineWithAI(transcript: t, detected: d, settings: MarkerSettings())
+        for c in d.starts { print(String(format: "START %@ score %.1f %@ :: %@", MarkerDetector.clock(c.time), c.score, c.reason, String(c.context.prefix(90)))) }
+        for c in d.ends { print(String(format: "END   %@ score %.1f %@ :: %@", MarkerDetector.clock(c.time), c.score, c.reason, String(c.context.prefix(90)))) }
+        exit(0)
+    }
+    RunLoop.main.run()
+}
 if args.first == "detect", args.count >= 2 {
     let file = URL(fileURLWithPath: args[1])
     Task {
@@ -33,7 +44,7 @@ if args.first == "detect", args.count >= 2 {
             let t = try await TranscriptionService().transcribe(source: file) { s, f in print("  \(s) \(f.map { String(Int($0 * 100)) + "%" } ?? "")") }
             print("words: \(t.words.count)")
             var d = MarkerDetector.heuristicCandidates(transcript: t, settings: MarkerSettings())
-            d = await MarkerDetector.refineWithAI(transcript: t, detected: d)
+            d = await MarkerDetector.refineWithAI(transcript: t, detected: d, settings: MarkerSettings())
             print("AI used: \(d.usedAI) \(d.notes)")
             for c in d.starts { print(String(format: "START %@ score %.1f [%@] %@ :: %@", MarkerDetector.clock(c.time), c.score, c.source.rawValue, c.reason, String(c.context.prefix(160)))) }
             for c in d.ends { print(String(format: "END   %@ score %.1f [%@] %@ :: %@", MarkerDetector.clock(c.time), c.score, c.source.rawValue, c.reason, String(c.context.prefix(160)))) }

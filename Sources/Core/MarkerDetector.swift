@@ -3,6 +3,8 @@ import FoundationModels
 
 public struct MarkerSettings: Codable, Equatable, Sendable {
     public var tailSeconds: Double = 5
+    /// Phrases that close the service intro (prayer, seating, kids dismissed): the speech right after them is likely the message.
+    public var transitionPhrases: [String] = ["be seated", "have a seat", "you may be seated", "dismissed", "amen", "in jesus' name", "in jesus name"]
     public var endPhrases: [String] = [
         "amen", "in jesus' name", "in jesus name", "worship with us", "let's worship", "let us worship",
         "let's stand", "would you stand", "stand with me", "go in peace", "have a great week", "see you next week",
@@ -74,7 +76,7 @@ public enum MarkerDetector {
             scored.append(MarkerCandidate(time: s.start, score: score, reason: reasons.joined(separator: ", "),
                                           context: contextText(sentences, around: i, before: 1, after: 3), source: .phrases))
         }
-        return topDistinct(scored, minSeparation: 90, count: 4)
+        return topDistinct(snapStarts(scored, sentences: sentences, settings: settings), minSeparation: 30, count: 4)
     }
 
     static func endCandidates(sentences: [Transcript.Sentence], transcript: Transcript, settings: MarkerSettings) -> [MarkerCandidate] {
@@ -113,6 +115,45 @@ public enum MarkerDetector {
         return s[lo...hi].map(\.text).joined(separator: " ")
     }
 
+    /// Index of the sentence where this continuous stretch of speech begins: walks back until a pause of 12 s or more,
+    /// or a closing phrase such as "amen" / "kids can be dismissed".
+    static func runStart(sentences: [Transcript.Sentence], index i: Int, boundaries: [String]) -> Int {
+        var j = i
+        while j > 0 {
+            if sentences[j].start - sentences[j - 1].end >= 12 { break }
+            let prev = sentences[j - 1].text.lowercased().replacingOccurrences(of: "’", with: "'")
+            if boundaries.contains(where: { prev.contains($0) }) { break }
+            j -= 1
+        }
+        return j
+    }
+
+    /// Moves each start candidate back to the beginning of its stretch of speech and merges duplicates.
+    static func snapStarts(_ items: [MarkerCandidate], sentences: [Transcript.Sentence], settings: MarkerSettings) -> [MarkerCandidate] {
+        var out: [MarkerCandidate] = []
+        for var c in items {
+            if let i = sentences.lastIndex(where: { $0.start <= c.time + 0.5 }) {
+                let j = runStart(sentences: sentences, index: i, boundaries: settings.transitionPhrases)
+                if j < i, c.time - sentences[j].start < 25 * 60 {
+                    c.time = sentences[j].start
+                    c.reason += (c.reason.isEmpty ? "" : "; ") + "start of this stretch of speech"
+                }
+            }
+            if let i = sentences.lastIndex(where: { $0.start <= c.time + 0.5 }), i > 0,
+               sentences[i].start - sentences[i - 1].end >= 8, sentences[i].start - sentences[i - 1].end < 90 {
+                let before = sentences[max(0, i - 3)..<i].map(\.text).joined(separator: " ").lowercased()
+                if ["be seated", "have a seat", "dismissed"].contains(where: { before.contains($0) }) {
+                    c.score += 4
+                    c.reason += (c.reason.isEmpty ? "" : "; ") + "follows “be seated / dismissed”"
+                }
+            }
+            if let k = out.firstIndex(where: { abs($0.time - c.time) < 1 }) {
+                if c.score > out[k].score { out[k] = c }
+            } else { out.append(c) }
+        }
+        return out.sorted { $0.score > $1.score }
+    }
+
     /// Words per minute spoken in a window (songs and silence score low, a sermon scores high).
     static func speechRate(_ t: Transcript, from a: Double, to b: Double) -> Double {
         let hi = min(b, t.duration), lo = max(0, a)
@@ -146,7 +187,7 @@ public enum MarkerDetector {
     }
 
     /// Asks Apple's on-device model to pick the exact sentence near each phrase-based candidate.
-    public static func refineWithAI(transcript: Transcript, detected: DetectedMarkers) async -> DetectedMarkers {
+    public static func refineWithAI(transcript: Transcript, detected: DetectedMarkers, settings: MarkerSettings = MarkerSettings()) async -> DetectedMarkers {
         var out = detected
         guard aiAvailable else { out.notes.append("Apple Intelligence isn't available, so only phrase matching was used."); return out }
         let sentences = transcript.sentences
@@ -172,7 +213,7 @@ public enum MarkerDetector {
         }
         if !refinedStarts.isEmpty || !refinedEnds.isEmpty { out.usedAI = true }
         // AI answers go first (they carry a confidence-based score), phrase candidates remain as alternates.
-        out.starts = dedupe(merge(ai: refinedStarts, phrases: detected.starts))
+        out.starts = dedupe(snapStarts(merge(ai: refinedStarts, phrases: detected.starts), sentences: sentences, settings: settings))
         out.ends = dedupe(merge(ai: refinedEnds, phrases: detected.ends))
         return out
     }

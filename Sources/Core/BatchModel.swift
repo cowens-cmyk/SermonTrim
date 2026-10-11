@@ -68,7 +68,7 @@ final class BatchModel {
             }
             set(i, .working("Finding the start and end…", nil))
             var d = MarkerDetector.heuristicCandidates(transcript: transcript, settings: markerSettings)
-            d = await MarkerDetector.refineWithAI(transcript: transcript, detected: d)
+            d = await MarkerDetector.refineWithAI(transcript: transcript, detected: d, settings: markerSettings)
 
             guard d.starts.first != nil || d.ends.first != nil else {
                 set(i, .failed("Couldn't find where the message starts or ends. Open it in the editor.")); return

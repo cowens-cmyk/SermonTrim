@@ -416,10 +416,10 @@ final class AppModel {
                 }
                 detectState = .working("Finding the start and end…", nil)
                 var d = MarkerDetector.heuristicCandidates(transcript: t, settings: settings)
-                d = await MarkerDetector.refineWithAI(transcript: t, detected: d)
+                d = await MarkerDetector.refineWithAI(transcript: t, detected: d, settings: settings)
                 detectState = .ready(d)
             } catch {
-                detectState = .failed(error.localizedDescription)
+                detectState = .failed(ErrorExplainer.explain(error, operation: "Finding the start and end", input: url).message)
             }
         }
     }

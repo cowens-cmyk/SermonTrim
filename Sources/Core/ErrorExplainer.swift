@@ -20,6 +20,7 @@ public enum ErrorExplainer {
     /// Checks the file and (optionally) the output folder before blaming the media.
     public static func explain(_ error: Error, operation: String, input: URL? = nil, outputFolder: URL? = nil) -> Explanation {
         if let e = error as? ExportError, case .cancelled = e { return Explanation(message: e.localizedDescription, isPermission: false) }
+        if let e = error as? TranscriptionError { switch e { case .stage, .audioStops: return Explanation(message: e.localizedDescription, isPermission: false); default: break } }
         let fm = FileManager.default
 
         if let input {
