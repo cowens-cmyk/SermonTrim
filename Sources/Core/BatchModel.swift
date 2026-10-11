@@ -96,7 +96,7 @@ final class BatchModel {
         } catch is CancellationError {
             set(i, .failed("Cancelled"))
         } catch {
-            set(i, .failed(error.localizedDescription))
+            set(i, .failed(ErrorExplainer.explain(error, operation: "Batch", input: url, outputFolder: url.deletingLastPathComponent()).message))
         }
     }
 }

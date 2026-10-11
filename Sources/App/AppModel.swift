@@ -28,6 +28,7 @@ final class AppModel {
     var duration = 0.0
     var frameRate = 30.0
     var loadError: String?
+    var loadErrorIsPermission = false
     var waveform: [Float] = []
 
     // Playhead
@@ -178,7 +179,9 @@ final class AppModel {
                 if !Task.isCancelled, self.url == url { self.waveform = peaks }
             }
         } catch {
-            loadError = error.localizedDescription
+            let e = ErrorExplainer.explain(error, operation: "Opening the video", input: url)
+            loadError = e.message
+            loadErrorIsPermission = e.isPermission
         }
     }
 
@@ -369,7 +372,9 @@ final class AppModel {
             } catch ExportError.cancelled {
                 exportState = .idle
             } catch {
-                exportState = .failed(error.localizedDescription)
+                let e = ErrorExplainer.explain(error, operation: "Export", input: url, outputFolder: output.deletingLastPathComponent())
+                exportState = .failed(e.message)
+                if e.isPermission { NSWorkspace.shared.open(ErrorExplainer.privacySettingsURL) }
             }
             self.engine = nil
         }

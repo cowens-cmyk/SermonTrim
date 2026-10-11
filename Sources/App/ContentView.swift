@@ -57,6 +57,9 @@ struct ContentView: View {
             return .handled
         }
         .alert("Couldn't open that file", isPresented: .constant(model.loadError != nil)) {
+            if model.loadErrorIsPermission {
+                Button("Open Privacy Settings") { NSWorkspace.shared.open(ErrorExplainer.privacySettingsURL); model.loadError = nil }
+            }
             Button("OK") { model.loadError = nil }
         } message: { Text(model.loadError ?? "") }
     }

@@ -58,6 +58,8 @@ public final class ExportEngine: @unchecked Sendable {
 
     public func export(source: URL, output: URL, spec: TrimSpec, progress: @escaping ProgressHandler) async throws -> Result {
         var log: [String] = []
+        let sourceSize = Int64((try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        try ErrorExplainer.checkSpace(for: output, needing: Int64(Double(sourceSize) * 1.05))
         let asset = AVURLAsset(url: source, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         let info = try await SourceAnalyzer.analyze(asset: asset)
         let keyframes = AssetKeyframeProvider(asset: asset, info: info)
