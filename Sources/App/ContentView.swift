@@ -43,16 +43,17 @@ struct ContentView: View {
         .onAppear { focused = true; model.undoManager = undoManager }
         .onChange(of: undoManager) { _, new in model.undoManager = new }
         .sheet(isPresented: $model.showBatch) { BatchView().environment(model) }
-        .onKeyPress(.space) { guard model.hasFile else { return .ignored }; model.togglePlay(); return .handled }
+        .sheet(isPresented: $model.showDetailsSheet) { SermonDetailsSheet().environment(model).interactiveDismissDisabled() }
+        .onKeyPress(.space) { guard model.hasFile, !Self.isTyping else { return .ignored }; model.togglePlay(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "iIoO"), phases: .down) { press in
-            guard model.hasFile else { return .ignored }
+            guard model.hasFile, !Self.isTyping else { return .ignored }
             if press.characters.lowercased() == "i" { model.setIn() } else { model.setOut() }
             return .handled
         }
-        .onKeyPress(.leftArrow) { model.hasFile ? { model.step(frames: -1); return .handled }() : .ignored }
-        .onKeyPress(.rightArrow) { model.hasFile ? { model.step(frames: 1); return .handled }() : .ignored }
+        .onKeyPress(.leftArrow) { model.hasFile && !Self.isTyping ? { model.step(frames: -1); return .handled }() : .ignored }
+        .onKeyPress(.rightArrow) { model.hasFile && !Self.isTyping ? { model.step(frames: 1); return .handled }() : .ignored }
         .onKeyPress(characters: CharacterSet(charactersIn: ",."), phases: .down) { press in
-            guard model.hasFile else { return .ignored }
+            guard model.hasFile, !Self.isTyping else { return .ignored }
             model.jump(seconds: press.characters == "," ? -1 : 1)
             return .handled
         }
@@ -62,6 +63,14 @@ struct ContentView: View {
             }
             Button("OK") { model.loadError = nil }
         } message: { Text(model.loadError ?? "") }
+    }
+}
+
+extension ContentView {
+    /// True while a text field (title, timecodes, search…) has the keyboard, so shortcuts don't steal typing.
+    static var isTyping: Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        return responder is NSText || NSApp.keyWindow?.attachedSheet != nil || NSApp.modalWindow != nil
     }
 }
 

@@ -80,6 +80,7 @@ final class AppModel {
 
     init() {
         loadSettings()
+        cleanUpTempExports()
         statusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             let playing = p.timeControlStatus != .paused
             Task { @MainActor in self?.isPlaying = playing }
@@ -395,8 +396,16 @@ final class AppModel {
 
     // MARK: Export
 
+    // Export runs straight away into a hidden temp file; the sermon details sheet is filled in meanwhile.
+    // When both are done the file gets its final name, folder and speaker tag.
+    var showDetailsSheet = false
+    private(set) var detailsSubmitted = false
+    private var finishedExport: ExportEngine.Result?
+    private var exportSource: URL?
+    static let tempPrefix = ".SermonTrim-export-"
+
     func export() {
-        guard let url, !isExporting else { return }
+        guard let url, !isExporting, !isFinishing else { return }
         if let pf = preflight, pf.isHeavy {
             let alert = NSAlert()
             alert.messageText = "This export will re-encode \(Int(pf.reencodedSeconds)) seconds"
@@ -408,41 +417,100 @@ final class AppModel {
         player.pause()
         let fm = FileManager.default
         try? fm.createDirectory(at: outputFolder, withIntermediateDirectories: true)
-        let folder = outputFolder
-        let info = sermonInfo
-        let hasTitle = SermonNaming.baseName(for: info) != nil
-        let output: URL
-        if let base = SermonNaming.baseName(for: info) {
-            output = SermonNaming.uniqueURL(folder: folder, base: base, ext: SermonNaming.fileExtension(for: url))
-        } else {
-            output = ExportEngine.uniqueOutputURL(for: url, in: folder)
-        }
+        let temp = outputFolder.appendingPathComponent(Self.tempPrefix + UUID().uuidString).appendingPathExtension(SermonNaming.fileExtension(for: url))
         let engine = ExportEngine()
         self.engine = engine
+        exportSource = url
+        finishedExport = nil
+        detailsSubmitted = false
+        sermonTitle = ""
         exportState = .running(stage: "Preparing", fraction: 0)
+        showDetailsSheet = true
         let spec = self.spec
         Task {
             do {
-                let result = try await engine.export(source: url, output: output, spec: spec, sermon: hasTitle ? info : nil) { [weak self] p in
+                let result = try await engine.export(source: url, output: temp, spec: spec) { [weak self] p in
                     Task { @MainActor in
                         guard let self, self.isExporting else { return }
                         self.exportState = .running(stage: p.stage, fraction: p.fraction)
                     }
                 }
-                let tags = Tagging.speakers(from: info.speaker)
-                if !tags.isEmpty { try? Tagging.apply(tags, to: result.outputURL) }
-                rememberSpeaker()
-                exportState = .done(result)
-                NSSound(named: "Glass")?.play()
-            } catch ExportError.cancelled {
-                exportState = .idle
+                self.engine = nil
+                finishedExport = result
+                if detailsSubmitted { await finalize() } else { exportState = .running(stage: "Waiting for sermon details", fraction: 1) }
             } catch {
-                let e = ErrorExplainer.explain(error, operation: "Export", input: url, outputFolder: output.deletingLastPathComponent())
+                self.engine = nil
+                try? FileManager.default.removeItem(at: temp)
+                showDetailsSheet = false
+                if case ExportError.cancelled = error { exportState = .idle; return }
+                let e = ErrorExplainer.explain(error, operation: "Export", input: url, outputFolder: temp.deletingLastPathComponent())
                 exportState = .failed(e.message)
                 if e.isPermission { NSWorkspace.shared.open(ErrorExplainer.privacySettingsURL) }
             }
-            self.engine = nil
         }
+    }
+
+    var isFinishing = false
+    var exportFinishedWaiting: Bool { finishedExport != nil && !detailsSubmitted }
+
+    /// "Save" in the details sheet. Safe to press before or after the export itself has finished.
+    func submitDetails() {
+        detailsSubmitted = true
+        showDetailsSheet = false
+        if finishedExport != nil { Task { await finalize() } }
+    }
+
+    /// Saves with the original filename (plus " - trimmed") and no tag.
+    func skipDetails() {
+        sermonTitle = ""
+        submitDetails()
+    }
+
+    /// Gives the finished temp file its real name/folder and the speaker tag.
+    private func finalize() async {
+        guard var result = finishedExport, let source = exportSource, !isFinishing else { return }
+        isFinishing = true
+        defer { isFinishing = false }
+        let info = sermonInfo
+        let folder = outputFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let dest: URL
+        if let base = SermonNaming.baseName(for: info) {
+            dest = SermonNaming.uniqueURL(folder: folder, base: base, ext: SermonNaming.fileExtension(for: source))
+        } else {
+            dest = ExportEngine.uniqueOutputURL(for: source, in: folder)
+        }
+        if folder.standardizedFileURL != result.outputURL.deletingLastPathComponent().standardizedFileURL {
+            exportState = .running(stage: "Moving to \(folder.lastPathComponent)", fraction: 1)
+        }
+        let temp = result.outputURL
+        let moveError: Error? = await Task.detached {
+            do { try FileManager.default.moveItem(at: temp, to: dest); return nil } catch { return error }
+        }.value
+        if let moveError {
+            exportState = .failed(ErrorExplainer.explain(moveError, operation: "Saving the file", outputFolder: folder).message)
+            return
+        }
+        result.outputURL = dest
+        let tags = Tagging.speakers(from: info.speaker)
+        if !tags.isEmpty { try? Tagging.apply(tags, to: dest) }
+        rememberSpeaker()
+        finishedExport = nil
+        exportState = .done(result)
+        NSSound(named: "Glass")?.play()
+    }
+
+    /// Leftovers from an export interrupted by quitting the app.
+    func cleanUpTempExports() {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: outputFolder, includingPropertiesForKeys: nil, options: []) else { return }
+        for f in items where f.lastPathComponent.hasPrefix(Self.tempPrefix) { try? fm.removeItem(at: f) }
+    }
+
+    func cancelExportFromSheet() {
+        showDetailsSheet = false
+        if let r = finishedExport { try? FileManager.default.removeItem(at: r.outputURL); finishedExport = nil; exportState = .idle }
+        else { engine?.cancel() }
     }
 
     func cancelExport() { engine?.cancel() }

@@ -24,8 +24,6 @@ struct ControlsPanel: View {
                     }
                 }
 
-                SermonCard()
-
                 HStack(spacing: 10) {
                     transport
                     Spacer(minLength: 12)
@@ -156,76 +154,110 @@ struct ExportButton: View {
     }
 }
 
-struct SermonCard: View {
+struct SermonDetailsSheet: View {
     @Environment(AppModel.self) private var model
-    @State private var showCalendar = false
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         @Bindable var model = model
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Sermon").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
-            HStack(alignment: .bottom, spacing: 12) {
-                field("Title") {
-                    TextField("The Lord Sees", text: $model.sermonTitle)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Sermon Details").font(.title2.weight(.semibold))
+                Spacer()
+                progress
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Title").font(.caption).foregroundStyle(.secondary)
+                TextField("The Lord Sees", text: $model.sermonTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.title3)
+                    .focused($titleFocused)
+                    .onSubmit { if canSave { model.submitDetails() } }
+            }
+
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Date preached").font(.caption).foregroundStyle(.secondary)
+                    DatePicker("Date preached", selection: $model.sermonDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+                        .frame(width: 240)
+                    Button("Closest Sunday") { model.useClosestSunday(to: model.sermonDate) }
+                        .buttonStyle(.glass).controlSize(.small)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Speaker").font(.caption).foregroundStyle(.secondary)
+                    TextField("Pastor name", text: $model.speaker)
                         .textFieldStyle(.roundedBorder)
-                }
-                field("Date") {
-                    Button {
-                        showCalendar.toggle()
-                    } label: {
-                        Label(model.sermonDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()), systemImage: "calendar")
-                            .frame(minWidth: 150, alignment: .leading)
+                        .onSubmit { if canSave { model.submitDetails() } }
+                    if !model.recentSpeakers.isEmpty {
+                        Text("Recent").font(.caption2).foregroundStyle(.tertiary).padding(.top, 4)
+                        FlowButtons(names: model.recentSpeakers) { model.speaker = $0 }
                     }
-                    .buttonStyle(.glass)
-                    .popover(isPresented: $showCalendar, arrowEdge: .bottom) {
-                        VStack(spacing: 8) {
-                            DatePicker("Preached on", selection: $model.sermonDate, displayedComponents: .date)
-                                .datePickerStyle(.graphical)
-                                .labelsHidden()
-                            HStack {
-                                Button("Closest Sunday") { model.useClosestSunday(to: model.sermonDate); showCalendar = false }
-                                Spacer()
-                                Button("Done") { showCalendar = false }.buttonStyle(.glassProminent)
-                            }
-                        }
-                        .padding(14)
-                        .frame(width: 300)
+                    Text("Becomes a Finder tag. Separate several speakers with commas.")
+                        .font(.caption2).foregroundStyle(.secondary).padding(.top, 2)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc").foregroundStyle(.secondary)
+                    Text(model.outputFileName).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                    ForEach(Tagging.speakers(from: model.speaker), id: \.self) {
+                        Text($0).font(.caption2).padding(.horizontal, 7).padding(.vertical, 2).background(.tint.opacity(0.25), in: .capsule)
                     }
                 }
-                field("Speaker") {
-                    HStack(spacing: 4) {
-                        TextField("Pastor name", text: $model.speaker).textFieldStyle(.roundedBorder).frame(minWidth: 130)
-                        if !model.recentSpeakers.isEmpty {
-                            Menu {
-                                ForEach(model.recentSpeakers, id: \.self) { name in Button(name) { model.speaker = name } }
-                            } label: { Image(systemName: "chevron.down.circle") }
-                                .menuStyle(.borderlessButton)
-                                .fixedSize()
-                                .help("Recent speakers")
-                        }
-                    }
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").foregroundStyle(.secondary)
+                    Text("Saves to \(model.outputFolderName)").font(.footnote).foregroundStyle(.secondary)
+                    Button("Change…") { model.chooseOutputFolder() }.buttonStyle(.link).font(.footnote)
                 }
             }
-            HStack(spacing: 8) {
-                Image(systemName: "doc.badge.arrow.up").foregroundStyle(.secondary)
-                Text(model.outputFileName).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
-                if !Tagging.speakers(from: model.speaker).isEmpty {
-                    ForEach(Tagging.speakers(from: model.speaker), id: \.self) { Text($0).font(.caption2).padding(.horizontal, 7).padding(.vertical, 2).background(.tint.opacity(0.25), in: .capsule) }
-                }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 10))
+
+            HStack {
+                Button("Cancel Export", role: .destructive) { model.cancelExportFromSheet() }
                 Spacer()
-                Text("Saves to \(model.outputFolderName)").font(.footnote).foregroundStyle(.secondary)
-                Button("Change…") { model.chooseOutputFolder() }.buttonStyle(.glass).controlSize(.small)
+                Button("Skip") { model.skipDetails() }
+                    .help("Save with the original filename and no tag")
+                Button(model.exportFinishedWaiting ? "Save" : "Save When Done") { model.submitDetails() }
+                    .buttonStyle(.glassProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSave)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .padding(22)
+        .frame(width: 560)
+        .onAppear { titleFocused = true }
     }
 
-    private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            content()
+    private var canSave: Bool { !SermonNaming.sanitize(model.sermonTitle).isEmpty }
+
+    @ViewBuilder private var progress: some View {
+        switch model.exportState {
+        case .running(let stage, let f):
+            HStack(spacing: 8) {
+                ProgressView(value: f).frame(width: 120)
+                Text(f >= 1 && model.exportFinishedWaiting ? "Export ready" : stage).font(.caption).foregroundStyle(.secondary)
+            }
+        default: EmptyView()
+        }
+    }
+}
+
+/// Small wrapping row of buttons for recent speaker names.
+struct FlowButtons: View {
+    let names: [String]
+    let action: (String) -> Void
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack { ForEach(names.prefix(6), id: \.self) { n in Button(n) { action(n) }.buttonStyle(.glass).controlSize(.small) } }
+            VStack(alignment: .leading) { ForEach(names.prefix(6), id: \.self) { n in Button(n) { action(n) }.buttonStyle(.glass).controlSize(.small) } }
         }
     }
 }

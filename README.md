@@ -40,9 +40,10 @@ in about 45 s (92 s with a simultaneous full decode check); the copied middle wa
 Phrase lists and the wait time are editable in Settings (⌘,).
 
 ## Sermon info and file naming
-Enter the **title**, **date** (calendar; defaults to the Sunday closest to the video's date) and **speaker**. The export is saved
+Click **Export**: the export starts right away and a **Sermon Details** window opens while it runs. Enter the **title**, **date**
+(calendar; defaults to the Sunday closest to the video's date) and **speaker**, then **Save** (or *Save When Done*). The export is saved
 to the Desktop (changeable) as `The Lord Sees (10.4.26).mp4`, the speaker becomes a **Finder tag** (so you can filter by speaker
-in Finder), and title/speaker/date are also written inside the file. Several speakers: separate with commas. The original video
+in Finder). Several speakers: separate with commas. *Skip* saves with the original name and no tag. The original video
 is never touched; without a title the file is saved as `<original name> - trimmed`.
 
 ## Also included

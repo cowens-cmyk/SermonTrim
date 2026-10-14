@@ -71,47 +71,111 @@ final class MessageOnlyTests: XCTestCase {
 
 @MainActor
 final class SermonFlowTests: XCTestCase {
-    func testTitleSpeakerDateDriveTheExportedFile() async throws {
+    var dir: URL!
+    var outDir: URL!
+    var src: URL!
+
+    override func setUp() async throws {
         let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) }
         guard let ffmpeg else { throw XCTSkip("ffmpeg not installed") }
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("st-flow-\(UUID().uuidString)")
-        let outDir = dir.appendingPathComponent("Desktop-like")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let src = dir.appendingPathComponent("Sunday Morning 1080.mp4")
+        dir = FileManager.default.temporaryDirectory.appendingPathComponent("st-flow-\(UUID().uuidString)")
+        outDir = dir.appendingPathComponent("Desktop-like")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        src = dir.appendingPathComponent("Sunday Morning 1080.mp4")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ffmpeg)
         p.arguments = ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "25",
                        "-c:v", "libx264", "-g", "60", "-pix_fmt", "yuv420p", "-c:a", "aac", src.path]
         try p.run(); p.waitUntilExit()
-        let originalSize = try src.resourceValues(forKeys: [.fileSizeKey]).fileSize
+    }
 
+    override func tearDown() async throws {
+        if let dir { try? FileManager.default.removeItem(at: dir) }
+        for k in ["recentSpeakers", "lastSpeaker", "outputFolder"] { UserDefaults.standard.removeObject(forKey: k) }
+    }
+
+    func loadedModel() async throws -> AppModel {
         let model = AppModel()
         model.open(src)
         for _ in 0..<100 where !model.hasFile { try await Task.sleep(for: .milliseconds(100)) }
         XCTAssertTrue(model.hasFile)
-        // The date defaults to the Sunday closest to the file's date.
-        XCTAssertEqual(Calendar(identifier: .gregorian).component(.weekday, from: model.sermonDate), 1)
-
         model.outputFolder = outDir
+        model.setIn(1)
+        return model
+    }
+
+    func waitUntilDone(_ model: AppModel) async throws -> ExportEngine.Result {
+        for _ in 0..<400 {
+            if case .done(let r) = model.exportState { return r }
+            if case .failed(let m) = model.exportState { XCTFail(m); break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw XCTSkip("export did not finish: \(model.exportState)")
+    }
+
+    func waitUntilExportFinishedWaiting(_ model: AppModel) async throws {
+        for _ in 0..<400 where !model.exportFinishedWaiting { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertTrue(model.exportFinishedWaiting)
+    }
+
+    func hiddenLeftovers() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: outDir.path)) ?? []).filter { $0.hasPrefix(AppModel.tempPrefix) }
+    }
+
+    /// Typing the details while the export is still running.
+    func testDetailsEnteredDuringExport() async throws {
+        let model = try await loadedModel()
+        let originalSize = try src.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        XCTAssertEqual(Calendar(identifier: .gregorian).component(.weekday, from: model.sermonDate), 1, "defaults to a Sunday")
+        model.export()
+        XCTAssertTrue(model.showDetailsSheet)
+        XCTAssertTrue(model.isExporting)
         model.sermonTitle = "The Lord Sees"
         model.sermonDate = SermonNaming.gregorian.date(from: DateComponents(year: 2026, month: 10, day: 4))!
         model.speaker = "Rick"
-        XCTAssertEqual(model.outputFileName, "The Lord Sees (10.4.26).mp4")
-        model.setIn(1)
-        model.export()
-        for _ in 0..<300 {
-            if case .done = model.exportState { break }
-            if case .failed = model.exportState { break }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        guard case .done(let result) = model.exportState else { return XCTFail("export did not finish: \(model.exportState)") }
-        XCTAssertEqual(result.outputURL.deletingLastPathComponent().path, outDir.path)
-        XCTAssertEqual(result.outputURL.lastPathComponent, "The Lord Sees (10.4.26).mp4")
-        XCTAssertEqual(Tagging.tags(of: result.outputURL), ["Rick"])
+        model.submitDetails()
+        XCTAssertFalse(model.showDetailsSheet)
+        let r = try await waitUntilDone(model)
+        XCTAssertEqual(r.outputURL.lastPathComponent, "The Lord Sees (10.4.26).mp4")
+        XCTAssertEqual(r.outputURL.deletingLastPathComponent().path, outDir.path)
+        XCTAssertEqual(Tagging.tags(of: r.outputURL), ["Rick"])
         XCTAssertEqual(try src.resourceValues(forKeys: [.fileSizeKey]).fileSize, originalSize, "original untouched")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: src.path))
+        XCTAssertEqual(hiddenLeftovers(), [])
         XCTAssertEqual(model.recentSpeakers.first, "Rick")
-        UserDefaults.standard.removeObject(forKey: "recentSpeakers"); UserDefaults.standard.removeObject(forKey: "lastSpeaker"); UserDefaults.standard.removeObject(forKey: "outputFolder")
+    }
+
+    /// The export finishes first; the file is only named once Save is pressed.
+    func testDetailsEnteredAfterExportFinished() async throws {
+        let model = try await loadedModel()
+        model.export()
+        try await waitUntilExportFinishedWaiting(model)
+        XCTAssertEqual(hiddenLeftovers().count, 1, "waits as a hidden temp file")
+        model.sermonTitle = "Grace Upon Grace"
+        model.sermonDate = SermonNaming.gregorian.date(from: DateComponents(year: 2026, month: 10, day: 11))!
+        model.speaker = "Will, Rick"
+        model.submitDetails()
+        let r = try await waitUntilDone(model)
+        XCTAssertEqual(r.outputURL.lastPathComponent, "Grace Upon Grace (10.11.26).mp4")
+        XCTAssertEqual(Set(Tagging.tags(of: r.outputURL)), ["Will", "Rick"])
+        XCTAssertEqual(hiddenLeftovers(), [])
+    }
+
+    func testSkipUsesOriginalNameWithoutTag() async throws {
+        let model = try await loadedModel()
+        model.speaker = ""
+        model.export()
+        model.skipDetails()
+        let r = try await waitUntilDone(model)
+        XCTAssertEqual(r.outputURL.lastPathComponent, "Sunday Morning 1080 - trimmed.mp4")
+        XCTAssertEqual(Tagging.tags(of: r.outputURL), [])
+    }
+
+    func testCancelFromSheetLeavesNothingBehind() async throws {
+        let model = try await loadedModel()
+        model.export()
+        try await waitUntilExportFinishedWaiting(model)
+        model.cancelExportFromSheet()
+        XCTAssertEqual(hiddenLeftovers(), [])
+        XCTAssertEqual(((try? FileManager.default.contentsOfDirectory(atPath: outDir.path)) ?? []).count, 0)
     }
 }
