@@ -12,7 +12,7 @@ xcodegen generate
 xcodebuild -project SermonTrim.xcodeproj -scheme SermonTrim -configuration Release -derivedDataPath build build | tail -1
 ./Scripts/make_dmg.sh "build/Build/Products/Release/Sermon Trim.app"
 git add -A
-git diff --cached --quiet || git commit -m "Release $V" -m "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+git diff --cached --quiet || git commit -m "Release $V" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git tag "v$V"
 git push origin main "v$V"
 gh release create "v$V" dist/SermonTrim.dmg --title "Sermon Trim $V" --notes "$NOTES"
