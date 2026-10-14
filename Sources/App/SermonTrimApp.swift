@@ -8,7 +8,7 @@ struct SermonTrimApp: App {
         Window("Sermon Trim", id: "main") {
             ContentView()
                 .environment(model)
-                .frame(minWidth: 1100, minHeight: 700)
+                .frame(minWidth: 1100, minHeight: 760)
                 .onOpenURL { model.open($0) }
                 .task {
                     try? await Task.sleep(for: .seconds(4))
@@ -16,7 +16,7 @@ struct SermonTrimApp: App {
                 }
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1400, height: 880)
+        .defaultSize(width: 1400, height: 960)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { Task { await Updater.checkAndPrompt(silentIfCurrent: false) } }

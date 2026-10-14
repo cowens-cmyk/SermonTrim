@@ -13,7 +13,7 @@ struct BatchView: View {
                 Spacer()
                 Button("Add Files…") { model.openBatchPanel() }.buttonStyle(.glass).disabled(batch.running)
             }
-            Text("Each file is transcribed on this Mac, the start and end are detected, and a trimmed copy is saved next to the original using your current fade settings (start: \(describe(model.startKind, model.startDuration)), end: \(describe(model.endKind, model.endDuration)), \(Int(model.tailSeconds)) s hold). Detection is a best guess — use “Open in Editor” to check any file.")
+            Text("Each file is transcribed on this Mac, the start and end are detected, and a trimmed copy is saved to \(model.outputFolderName) using your current fade settings (start: \(describe(model.startKind, model.startDuration)), end: \(describe(model.endKind, model.endDuration)), \(Int(model.tailSeconds)) s hold). Detection is a best guess — use “Open in Editor” to check any file.")
                 .font(.footnote).foregroundStyle(.secondary)
 
             if batch.items.isEmpty {
@@ -37,7 +37,7 @@ struct BatchView: View {
                     Button("Start") {
                         batch.start(startFade: Transition(kind: model.startKind, duration: model.startDuration),
                                     endFade: Transition(kind: model.endKind, duration: model.endDuration),
-                                    tail: model.tailSeconds, markerSettings: model.markerSettings)
+                                    tail: model.tailSeconds, markerSettings: model.markerSettings, outputFolder: model.outputFolder)
                     }
                     .buttonStyle(.glassProminent)
                     .disabled(!batch.items.contains { if case .waiting = $0.status { return true }; return false })

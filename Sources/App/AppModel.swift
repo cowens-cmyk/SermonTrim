@@ -44,6 +44,13 @@ final class AppModel {
     var endDuration = 3.0 { didSet { settingsChanged() } }
     var tailSeconds = 5.0 { didSet { saveSettings() } }
 
+    // Sermon info → filename, speaker tag, embedded metadata
+    var sermonTitle = ""
+    var sermonDate = SermonNaming.closestSunday(to: Date())
+    var speaker = ""
+    var recentSpeakers: [String] = []
+    var outputFolder: URL = SermonNaming.desktop { didSet { saveSettings() } }
+
     // UI
     var showInspector = true
     var bladeOpen = false
@@ -108,6 +115,9 @@ final class AppModel {
         if d.object(forKey: "startDuration") != nil { startDuration = d.double(forKey: "startDuration") }
         if d.object(forKey: "endDuration") != nil { endDuration = d.double(forKey: "endDuration") }
         if d.object(forKey: "tailSeconds") != nil { tailSeconds = d.double(forKey: "tailSeconds") }
+        recentSpeakers = d.stringArray(forKey: "recentSpeakers") ?? []
+        speaker = d.string(forKey: "lastSpeaker") ?? ""
+        if let path = d.string(forKey: "outputFolder"), FileManager.default.fileExists(atPath: path) { outputFolder = URL(fileURLWithPath: path, isDirectory: true) }
     }
 
     private func saveSettings() {
@@ -116,9 +126,48 @@ final class AppModel {
         d.set(startKind.rawValue, forKey: "startKind"); d.set(endKind.rawValue, forKey: "endKind")
         d.set(startDuration, forKey: "startDuration"); d.set(endDuration, forKey: "endDuration")
         d.set(tailSeconds, forKey: "tailSeconds")
+        d.set(outputFolder.path, forKey: "outputFolder")
     }
 
     private func settingsChanged() { saveSettings(); pointsChanged() }
+
+    // MARK: Sermon info
+
+    var sermonInfo: SermonInfo { SermonInfo(title: sermonTitle, date: sermonDate, speaker: speaker) }
+
+    var outputExtension: String { url.map { SermonNaming.fileExtension(for: $0) } ?? "mp4" }
+
+    /// What the exported file will be called (before any " 2" for duplicates).
+    var outputFileName: String {
+        if let base = SermonNaming.baseName(for: sermonInfo) { return "\(base).\(outputExtension)" }
+        guard let url else { return "" }
+        return "\(url.deletingPathExtension().lastPathComponent) - trimmed.\(outputExtension)"
+    }
+
+    var outputFolderName: String { outputFolder == SermonNaming.desktop ? "Desktop" : outputFolder.lastPathComponent }
+
+    func chooseOutputFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = outputFolder
+        panel.prompt = "Choose"
+        panel.message = "Where should trimmed videos be saved?"
+        if panel.runModal() == .OK, let u = panel.url { outputFolder = u }
+    }
+
+    func useClosestSunday(to date: Date) { sermonDate = SermonNaming.closestSunday(to: date) }
+
+    private func rememberSpeaker() {
+        let names = Tagging.speakers(from: speaker)
+        guard !names.isEmpty else { return }
+        var list = recentSpeakers
+        for n in names { list.removeAll { $0.caseInsensitiveCompare(n) == .orderedSame }; list.insert(n, at: 0) }
+        recentSpeakers = Array(list.prefix(12))
+        UserDefaults.standard.set(recentSpeakers, forKey: "recentSpeakers")
+        UserDefaults.standard.set(speaker, forKey: "lastSpeaker")
+    }
 
     // MARK: Opening
 
@@ -167,6 +216,9 @@ final class AppModel {
             self.outTime = points?.1 ?? dur
             suppressUndo = false
             undoManager?.removeAllActions()
+            sermonTitle = ""
+            let fileDate = (try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey]))
+            sermonDate = SermonNaming.closestSunday(to: fileDate?.creationDate ?? fileDate?.contentModificationDate ?? Date())
             self.currentTime = 0
             player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
             seek(to: self.inTime)
@@ -354,19 +406,32 @@ final class AppModel {
             if alert.runModal() != .alertFirstButtonReturn { return }
         }
         player.pause()
-        let output = ExportEngine.uniqueOutputURL(for: url)
+        let fm = FileManager.default
+        try? fm.createDirectory(at: outputFolder, withIntermediateDirectories: true)
+        let folder = outputFolder
+        let info = sermonInfo
+        let hasTitle = SermonNaming.baseName(for: info) != nil
+        let output: URL
+        if let base = SermonNaming.baseName(for: info) {
+            output = SermonNaming.uniqueURL(folder: folder, base: base, ext: SermonNaming.fileExtension(for: url))
+        } else {
+            output = ExportEngine.uniqueOutputURL(for: url, in: folder)
+        }
         let engine = ExportEngine()
         self.engine = engine
         exportState = .running(stage: "Preparing", fraction: 0)
         let spec = self.spec
         Task {
             do {
-                let result = try await engine.export(source: url, output: output, spec: spec) { [weak self] p in
+                let result = try await engine.export(source: url, output: output, spec: spec, sermon: hasTitle ? info : nil) { [weak self] p in
                     Task { @MainActor in
                         guard let self, self.isExporting else { return }
                         self.exportState = .running(stage: p.stage, fraction: p.fraction)
                     }
                 }
+                let tags = Tagging.speakers(from: info.speaker)
+                if !tags.isEmpty { try? Tagging.apply(tags, to: result.outputURL) }
+                rememberSpeaker()
                 exportState = .done(result)
                 NSSound(named: "Glass")?.play()
             } catch ExportError.cancelled {

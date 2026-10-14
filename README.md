@@ -39,6 +39,12 @@ in about 45 s (92 s with a simultaneous full decode check); the copied middle wa
    Out = last word + wait (default 5 s) + fade duration, so the fade starts after the quiet hold.
 Phrase lists and the wait time are editable in Settings (⌘,).
 
+## Sermon info and file naming
+Enter the **title**, **date** (calendar; defaults to the Sunday closest to the video's date) and **speaker**. The export is saved
+to the Desktop (changeable) as `The Lord Sees (10.4.26).mp4`, the speaker becomes a **Finder tag** (so you can filter by speaker
+in Finder), and title/speaker/date are also written inside the file. Several speakers: separate with commas. The original video
+is never touched; without a title the file is saved as `<original name> - trimmed`.
+
 ## Also included
 * **Live fade preview** — the player shows the fades (and audio ramps) as you adjust them. ⌘1 / ⌘2 play the start and end.
 * **Waveform** on the timeline, so the silence around "amen" is easy to see.

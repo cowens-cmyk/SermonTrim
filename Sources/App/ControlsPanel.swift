@@ -24,6 +24,8 @@ struct ControlsPanel: View {
                     }
                 }
 
+                SermonCard()
+
                 HStack(spacing: 10) {
                     transport
                     Spacer(minLength: 12)
@@ -150,6 +152,80 @@ struct ExportButton: View {
                 .controlSize(.large)
                 .disabled(model.isExporting)
                 .help("Export trimmed video next to the original (⌘E)")
+        }
+    }
+}
+
+struct SermonCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var showCalendar = false
+
+    var body: some View {
+        @Bindable var model = model
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sermon").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+            HStack(alignment: .bottom, spacing: 12) {
+                field("Title") {
+                    TextField("The Lord Sees", text: $model.sermonTitle)
+                        .textFieldStyle(.roundedBorder)
+                }
+                field("Date") {
+                    Button {
+                        showCalendar.toggle()
+                    } label: {
+                        Label(model.sermonDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()), systemImage: "calendar")
+                            .frame(minWidth: 150, alignment: .leading)
+                    }
+                    .buttonStyle(.glass)
+                    .popover(isPresented: $showCalendar, arrowEdge: .bottom) {
+                        VStack(spacing: 8) {
+                            DatePicker("Preached on", selection: $model.sermonDate, displayedComponents: .date)
+                                .datePickerStyle(.graphical)
+                                .labelsHidden()
+                            HStack {
+                                Button("Closest Sunday") { model.useClosestSunday(to: model.sermonDate); showCalendar = false }
+                                Spacer()
+                                Button("Done") { showCalendar = false }.buttonStyle(.glassProminent)
+                            }
+                        }
+                        .padding(14)
+                        .frame(width: 300)
+                    }
+                }
+                field("Speaker") {
+                    HStack(spacing: 4) {
+                        TextField("Pastor name", text: $model.speaker).textFieldStyle(.roundedBorder).frame(minWidth: 130)
+                        if !model.recentSpeakers.isEmpty {
+                            Menu {
+                                ForEach(model.recentSpeakers, id: \.self) { name in Button(name) { model.speaker = name } }
+                            } label: { Image(systemName: "chevron.down.circle") }
+                                .menuStyle(.borderlessButton)
+                                .fixedSize()
+                                .help("Recent speakers")
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "doc.badge.arrow.up").foregroundStyle(.secondary)
+                Text(model.outputFileName).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                if !Tagging.speakers(from: model.speaker).isEmpty {
+                    ForEach(Tagging.speakers(from: model.speaker), id: \.self) { Text($0).font(.caption2).padding(.horizontal, 7).padding(.vertical, 2).background(.tint.opacity(0.25), in: .capsule) }
+                }
+                Spacer()
+                Text("Saves to \(model.outputFolderName)").font(.footnote).foregroundStyle(.secondary)
+                Button("Change…") { model.chooseOutputFolder() }.buttonStyle(.glass).controlSize(.small)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            content()
         }
     }
 }

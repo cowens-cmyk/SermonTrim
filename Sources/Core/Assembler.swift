@@ -13,9 +13,11 @@ final class Assembler: @unchecked Sendable {
     let outputURL: URL
     let fileType: AVFileType
     let cancel: CancelToken
+    let sermon: SermonInfo?
 
-    init(asset: AVAsset, info: VideoSourceInfo, plan: ExportPlan, envelope: FadeEnvelope, segments: [SegmentSpec], outputURL: URL, fileType: AVFileType, cancel: CancelToken) {
+    init(asset: AVAsset, info: VideoSourceInfo, plan: ExportPlan, envelope: FadeEnvelope, segments: [SegmentSpec], outputURL: URL, fileType: AVFileType, cancel: CancelToken, sermon: SermonInfo? = nil) {
         self.cancel = cancel
+        self.sermon = sermon
         self.asset = asset; self.info = info; self.plan = plan; self.envelope = envelope
         self.segments = segments; self.outputURL = outputURL; self.fileType = fileType
     }
@@ -110,6 +112,7 @@ final class Assembler: @unchecked Sendable {
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: fileType)
         writer.shouldOptimizeForNetworkUse = true
+        if let sermon { writer.metadata = EmbeddedMetadata.items(for: sermon) }
         let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: formatHint)
         vIn.expectsMediaDataInRealTime = false
         guard writer.canAdd(vIn) else { throw ExportError.writerFailed("cannot add video input") }

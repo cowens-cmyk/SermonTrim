@@ -17,8 +17,8 @@ public final class ExportEngine: @unchecked Sendable {
     public init() {}
     public func cancel() { cancelToken.cancel() }
 
-    public static func uniqueOutputURL(for source: URL) -> URL {
-        let dir = source.deletingLastPathComponent()
+    public static func uniqueOutputURL(for source: URL, in folder: URL? = nil) -> URL {
+        let dir = folder ?? source.deletingLastPathComponent()
         let base = source.deletingPathExtension().lastPathComponent + " - trimmed"
         let ext = ["mp4", "mov", "m4v"].contains(source.pathExtension.lowercased()) ? source.pathExtension : "mp4"
         var url = dir.appendingPathComponent(base).appendingPathExtension(ext)
@@ -56,7 +56,7 @@ public final class ExportEngine: @unchecked Sendable {
         return Preflight(plan: plan, totalSeconds: CMTimeSubtract(plan.endTime, plan.firstFrame).seconds_, reencodedSeconds: plan.reencodedDuration)
     }
 
-    public func export(source: URL, output: URL, spec: TrimSpec, progress: @escaping ProgressHandler) async throws -> Result {
+    public func export(source: URL, output: URL, spec: TrimSpec, sermon: SermonInfo? = nil, progress: @escaping ProgressHandler) async throws -> Result {
         var log: [String] = []
         let sourceSize = Int64((try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         try ErrorExplainer.checkSpace(for: output, needing: Int64(Double(sourceSize) * 1.05))
@@ -105,7 +105,7 @@ public final class ExportEngine: @unchecked Sendable {
         // Stage 2: assemble.
         try? FileManager.default.removeItem(at: output)
         let assembler = Assembler(asset: asset, info: info, plan: plan, envelope: envelope, segments: segments,
-                                  outputURL: output, fileType: ext == "mp4" ? .mp4 : .mov, cancel: cancelToken)
+                                  outputURL: output, fileType: ext == "mp4" ? .mp4 : .mov, cancel: cancelToken, sermon: sermon)
         let assembleLog = try await assembler.run { f in progress(.init(stage: "Writing file", fraction: 0.25 + 0.75 * f)) }
         log.append(contentsOf: assembleLog)
         progress(.init(stage: "Done", fraction: 1))

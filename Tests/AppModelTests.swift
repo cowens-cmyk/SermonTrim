@@ -68,3 +68,50 @@ final class MessageOnlyTests: XCTestCase {
         XCTAssertEqual(d.ends.first?.time ?? 0, words.last!.end, accuracy: 2.0)
     }
 }
+
+@MainActor
+final class SermonFlowTests: XCTestCase {
+    func testTitleSpeakerDateDriveTheExportedFile() async throws {
+        let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let ffmpeg else { throw XCTSkip("ffmpeg not installed") }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("st-flow-\(UUID().uuidString)")
+        let outDir = dir.appendingPathComponent("Desktop-like")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let src = dir.appendingPathComponent("Sunday Morning 1080.mp4")
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: ffmpeg)
+        p.arguments = ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "25",
+                       "-c:v", "libx264", "-g", "60", "-pix_fmt", "yuv420p", "-c:a", "aac", src.path]
+        try p.run(); p.waitUntilExit()
+        let originalSize = try src.resourceValues(forKeys: [.fileSizeKey]).fileSize
+
+        let model = AppModel()
+        model.open(src)
+        for _ in 0..<100 where !model.hasFile { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertTrue(model.hasFile)
+        // The date defaults to the Sunday closest to the file's date.
+        XCTAssertEqual(Calendar(identifier: .gregorian).component(.weekday, from: model.sermonDate), 1)
+
+        model.outputFolder = outDir
+        model.sermonTitle = "The Lord Sees"
+        model.sermonDate = SermonNaming.gregorian.date(from: DateComponents(year: 2026, month: 10, day: 4))!
+        model.speaker = "Rick"
+        XCTAssertEqual(model.outputFileName, "The Lord Sees (10.4.26).mp4")
+        model.setIn(1)
+        model.export()
+        for _ in 0..<300 {
+            if case .done = model.exportState { break }
+            if case .failed = model.exportState { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard case .done(let result) = model.exportState else { return XCTFail("export did not finish: \(model.exportState)") }
+        XCTAssertEqual(result.outputURL.deletingLastPathComponent().path, outDir.path)
+        XCTAssertEqual(result.outputURL.lastPathComponent, "The Lord Sees (10.4.26).mp4")
+        XCTAssertEqual(Tagging.tags(of: result.outputURL), ["Rick"])
+        XCTAssertEqual(try src.resourceValues(forKeys: [.fileSizeKey]).fileSize, originalSize, "original untouched")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: src.path))
+        XCTAssertEqual(model.recentSpeakers.first, "Rick")
+        UserDefaults.standard.removeObject(forKey: "recentSpeakers"); UserDefaults.standard.removeObject(forKey: "lastSpeaker"); UserDefaults.standard.removeObject(forKey: "outputFolder")
+    }
+}

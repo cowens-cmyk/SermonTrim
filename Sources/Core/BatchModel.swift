@@ -40,14 +40,14 @@ final class BatchModel {
 
     func cancel() { task?.cancel(); engine?.cancel() }
 
-    func start(startFade: Transition, endFade: Transition, tail: Double, markerSettings: MarkerSettings) {
+    func start(startFade: Transition, endFade: Transition, tail: Double, markerSettings: MarkerSettings, outputFolder: URL? = nil) {
         guard !running else { return }
         running = true
         task = Task {
             for i in items.indices {
                 if Task.isCancelled { break }
                 guard case .waiting = items[i].status else { continue }
-                await process(index: i, startFade: startFade, endFade: endFade, tail: tail, markerSettings: markerSettings)
+                await process(index: i, startFade: startFade, endFade: endFade, tail: tail, markerSettings: markerSettings, outputFolder: outputFolder)
             }
             running = false
         }
@@ -55,7 +55,7 @@ final class BatchModel {
 
     private func set(_ i: Int, _ s: Status) { if items.indices.contains(i) { items[i].status = s } }
 
-    private func process(index i: Int, startFade: Transition, endFade: Transition, tail: Double, markerSettings: MarkerSettings) async {
+    private func process(index i: Int, startFade: Transition, endFade: Transition, tail: Double, markerSettings: MarkerSettings, outputFolder: URL?) async {
         let url = items[i].url
         do {
             set(i, .working("Reading file…", nil))
@@ -83,7 +83,7 @@ final class BatchModel {
             self.engine = engine
             let spec = TrimSpec(inTime: CMTime(seconds: inT, preferredTimescale: 60000), outTime: CMTime(seconds: outT, preferredTimescale: 60000),
                                 start: startFade, end: endFade)
-            let result = try await engine.export(source: url, output: ExportEngine.uniqueOutputURL(for: url), spec: spec) { [weak self] p in
+            let result = try await engine.export(source: url, output: ExportEngine.uniqueOutputURL(for: url, in: outputFolder), spec: spec) { [weak self] p in
                 Task { @MainActor in self?.set(i, .working(p.stage, p.fraction)) }
             }
             self.engine = nil
