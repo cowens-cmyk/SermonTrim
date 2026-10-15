@@ -160,7 +160,7 @@ final class AppModel {
 
     func useClosestSunday(to date: Date) { sermonDate = SermonNaming.closestSunday(to: date) }
 
-    private func rememberSpeaker() {
+    func rememberSpeaker() {
         let names = Tagging.speakers(from: speaker)
         guard !names.isEmpty else { return }
         var list = recentSpeakers

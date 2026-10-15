@@ -46,6 +46,11 @@ public enum ErrorExplainer {
         let folder = output.deletingLastPathComponent()
         let values = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
         let available = values?.volumeAvailableCapacityForImportantUsage ?? Int64(values?.volumeAvailableCapacity ?? 0)
+        try checkSpace(available: available, needing: bytes)
+    }
+
+    /// Keeps 200 MB spare so macOS never runs the drive completely full. `available` <= 0 means unknown (skip).
+    public static func checkSpace(available: Int64, needing bytes: Int64) throws {
         if available > 0 && available < bytes + 200_000_000 {
             let f = ByteCountFormatter()
             throw ExportError.writerFailed("There isn't enough free space on that drive. The export needs about \(f.string(fromByteCount: bytes)) and only \(f.string(fromByteCount: available)) is free.")

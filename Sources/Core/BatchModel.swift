@@ -29,6 +29,9 @@ final class BatchModel {
     private var task: Task<Void, Never>?
     private var engine: ExportEngine?
 
+    /// Starts 0.3 s before the detected first word so the opening syllable isn't clipped.
+    nonisolated static func inPoint(forDetectedStart start: Double?) -> Double { max(0, (start ?? 0) - 0.3) }
+
     func add(_ urls: [URL]) {
         for u in urls where !items.contains(where: { $0.url == u }) { items.append(Item(url: u)) }
     }
@@ -73,7 +76,7 @@ final class BatchModel {
             guard d.starts.first != nil || d.ends.first != nil else {
                 set(i, .failed("Couldn't find where the message starts or ends. Open it in the editor.")); return
             }
-            let inT = max(0, (d.starts.first?.time ?? 0) - 0.3)
+            let inT = Self.inPoint(forDetectedStart: d.starts.first?.time)
             let outT = d.ends.first.map { min(duration, $0.time + tail + endFade.effective) } ?? duration
             items[i].inTime = inT
             items[i].outTime = outT

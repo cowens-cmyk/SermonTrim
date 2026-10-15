@@ -62,7 +62,9 @@ final class Assembler: @unchecked Sendable {
         for seg in segments {
             switch seg {
             case .copied(let range):
-                out.append(try SampleSource(asset: asset, track: info.track, readRange: range, keepRange: range,
+                // Read with a margin and trim ourselves: with an exact time range, AVAssetReader pass-through can
+                // silently skip a B-frame just after the start keyframe (seen with HEVC), leaving a gap in the copy.
+                out.append(try SampleSource(asset: asset, track: info.track, readRange: Self.widened(range, within: info.timeRange), keepRange: range,
                                             ptsShift: CMTimeMultiply(plan.firstFrame, multiplier: -1)))
             case .encoded(let url, let sourceStart):
                 let a = AVURLAsset(url: url)
@@ -74,11 +76,18 @@ final class Assembler: @unchecked Sendable {
         return out
     }
 
+    static func widened(_ r: CMTimeRange, within track: CMTimeRange, margin: Double = 3) -> CMTimeRange {
+        let m = CMTime(seconds: margin, preferredTimescale: 600)
+        let start = CMTimeMaximum(track.start, CMTimeSubtract(r.start, m))
+        let end = CMTimeMinimum(track.end, CMTimeAdd(r.end, m))
+        return CMTimeRange(start: start, end: end)
+    }
+
     /// How many frames of display delay the copied stream needs between decode time and presentation time.
     private func measureReorderDelay() throws -> Int {
         guard case .copied(let range)? = segments.first(where: { if case .copied = $0 { return true } else { return false } }) else { return 0 }
         let probeEnd = CMTimeMinimum(range.end, CMTimeAdd(range.start, CMTime(seconds: 8, preferredTimescale: 600)))
-        let probe = try SampleSource(asset: asset, track: info.track, readRange: CMTimeRange(start: range.start, end: probeEnd),
+        let probe = try SampleSource(asset: asset, track: info.track, readRange: Self.widened(CMTimeRange(start: range.start, end: probeEnd), within: info.timeRange),
                                      keepRange: CMTimeRange(start: range.start, end: probeEnd), ptsShift: .zero)
         try probe.start()
         let frame = info.frameDuration.seconds_

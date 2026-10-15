@@ -3,6 +3,18 @@ import CoreMedia
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    var saved: [String: Any] = [:]
+    var scratch: URL!
+    override func setUp() async throws {
+        saved = WFDefaults.snapshot()
+        scratch = try WFScratch.make("baseline-model")
+        WFDefaults.prepare(outputFolder: scratch)
+    }
+    override func tearDown() async throws {
+        WFDefaults.restore(saved)
+        if let scratch { try? FileManager.default.removeItem(at: scratch) }
+    }
+
     func testUndoRedoOfInOutPoints() {
         let model = AppModel()
         let um = UndoManager()
@@ -74,13 +86,16 @@ final class SermonFlowTests: XCTestCase {
     var dir: URL!
     var outDir: URL!
     var src: URL!
+    var saved: [String: Any] = [:]
 
     override func setUp() async throws {
+        saved = WFDefaults.snapshot()
         let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) }
         guard let ffmpeg else { throw XCTSkip("ffmpeg not installed") }
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("st-flow-\(UUID().uuidString)")
         outDir = dir.appendingPathComponent("Desktop-like")
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        WFDefaults.prepare(outputFolder: outDir)
         src = dir.appendingPathComponent("Sunday Morning 1080.mp4")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: ffmpeg)
@@ -91,7 +106,7 @@ final class SermonFlowTests: XCTestCase {
 
     override func tearDown() async throws {
         if let dir { try? FileManager.default.removeItem(at: dir) }
-        for k in ["recentSpeakers", "lastSpeaker", "outputFolder"] { UserDefaults.standard.removeObject(forKey: k) }
+        WFDefaults.restore(saved)
     }
 
     func loadedModel() async throws -> AppModel {
@@ -110,7 +125,7 @@ final class SermonFlowTests: XCTestCase {
             if case .failed(let m) = model.exportState { XCTFail(m); break }
             try await Task.sleep(for: .milliseconds(100))
         }
-        throw XCTSkip("export did not finish: \(model.exportState)")
+        throw WFTimeout(description: "export did not finish: \(model.exportState)")
     }
 
     func waitUntilExportFinishedWaiting(_ model: AppModel) async throws {
