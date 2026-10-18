@@ -30,6 +30,10 @@ final class Assembler: @unchecked Sendable {
         let ptsShift: CMTime            // added to each sample's pts to land on the output timeline
         let keepRange: CMTimeRange?     // source-time filter (copied segments)
         var started = false
+        var isCopy: Bool { keepRange != nil }
+        /// Decode-time offset for re-encoded segments (no reordering, so DTS = PTS - offset).
+        var dtsLead = CMTime.zero
+        private var peeked: (CMSampleBuffer, CMTime)?
 
         init(asset: AVAsset, track: AVAssetTrack, readRange: CMTimeRange?, keepRange: CMTimeRange?, ptsShift: CMTime) throws {
             reader = try AVAssetReader(asset: asset)
@@ -46,7 +50,18 @@ final class Assembler: @unchecked Sendable {
         }
 
         /// Next sample in decode order, with its output-timeline PTS.
+        /// Looks at the next sample without consuming it.
+        func peek() -> (CMSampleBuffer, CMTime)? {
+            if peeked == nil { peeked = pull() }
+            return peeked
+        }
+
         func next() -> (CMSampleBuffer, CMTime)? {
+            if let p = peeked { peeked = nil; return p }
+            return pull()
+        }
+
+        private func pull() -> (CMSampleBuffer, CMTime)? {
             while let sb = output.copyNextSampleBuffer() {
                 if CMSampleBufferGetNumSamples(sb) == 0 { continue }       // reader marker buffers carry no media
                 let pts = CMSampleBufferGetPresentationTimeStamp(sb)
@@ -124,6 +139,11 @@ final class Assembler: @unchecked Sendable {
         if let sermon { writer.metadata = EmbeddedMetadata.items(for: sermon) }
         let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: formatHint)
         vIn.expectsMediaDataInRealTime = false
+        // Keep the source's time precision: rounding variable-rate timestamps to a coarse scale (e.g. 1/600 s)
+        // can make two decode times equal.
+        let sourceTimescale = (try? await info.track.load(.naturalTimeScale)) ?? 0
+        let timescale = max(sourceTimescale, 600)
+        vIn.mediaTimeScale = timescale
         guard writer.canAdd(vIn) else { throw ExportError.writerFailed("cannot add video input") }
         writer.add(vIn)
 
@@ -153,7 +173,19 @@ final class Assembler: @unchecked Sendable {
         let vQueue = DispatchQueue(label: "assemble-video")
         var sourceIndex = 0
         var pending: (CMSampleBuffer, CMTime)? = firstPeek
-        var nextDTS = CMTimeMultiply(frameDur, multiplier: Int32(-reorder))
+        // A re-encoded segment that runs into a stream copy must finish decoding before the copy's first
+        // keyframe decodes, so its DTS leads its PTS by that keyframe's own decode→display delay.
+        for (i, src) in sources.enumerated() where !src.isCopy {
+            if i + 1 < sources.count, sources[i + 1].isCopy, let (sb, pts) = sources[i + 1].peek() {
+                let dts = CMSampleBufferGetDecodeTimeStamp(sb)
+                if dts.isValid {
+                    let srcPTS = CMSampleBufferGetPresentationTimeStamp(sb)
+                    src.dtsLead = CMTimeMaximum(.zero, CMTimeSubtract(srcPTS, dts))
+                    _ = pts
+                }
+            }
+        }
+        var lastDTS: CMTime?
         var copiedCount = 0
         var videoDone = false
         vIn.requestMediaDataWhenReady(on: vQueue) {
@@ -168,13 +200,24 @@ final class Assembler: @unchecked Sendable {
                 guard let (sb, pts) = item else { videoDone = true; break }
                 var dur = CMSampleBufferGetDuration(sb)
                 if !dur.isValid || dur.seconds_ <= 0 { dur = frameDur }
-                let dts = nextDTS
-                nextDTS = CMTimeAdd(nextDTS, dur)
+                let current = sources[min(sourceIndex, sources.count - 1)]
+                let srcPTS = CMSampleBufferGetPresentationTimeStamp(sb)
+                let srcDTS = CMSampleBufferGetDecodeTimeStamp(sb)
+                var dts: CMTime
+                if current.isCopy, srcDTS.isValid {
+                    dts = CMTimeAdd(srcDTS, CMTimeSubtract(pts, srcPTS))      // keep the source's own decode order/timing
+                } else {
+                    dts = CMTimeSubtract(pts, current.dtsLead)
+                }
+                if let last = lastDTS, CMTimeCompare(dts, last) <= 0 {
+                    dts = CMTimeAdd(last, CMTime(value: 1, timescale: timescale))   // strictly increasing
+                }
                 if CMTimeCompare(dts, pts) > 0 {
-                    errBox.set(ExportError.unsupported("variable frame timing (decode time passed display time)"))
+                    errBox.set(ExportError.unsupported("the video's frame timestamps are out of order at \(String(format: "%.2f", pts.seconds_)) s"))
                     videoDone = true
                     break
                 }
+                lastDTS = dts
                 var timing = CMSampleTimingInfo(duration: dur, presentationTimeStamp: pts, decodeTimeStamp: dts)
                 var out: CMSampleBuffer?
                 let st = CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sb, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &out)

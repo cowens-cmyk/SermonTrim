@@ -92,6 +92,7 @@ final class SegmentEncoder: @unchecked Sendable {
         let total = max(range.duration.seconds_, 0.001)
         var count = 0
         var failure: Error?
+        var lastPTS: CMTime?
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             var finished = false
@@ -102,6 +103,9 @@ final class SegmentEncoder: @unchecked Sendable {
                     let pts = CMSampleBufferGetPresentationTimeStamp(sb)
                     if CMTimeCompare(pts, startThreshold) < 0 { continue }     // pre-roll frames before the In point
                     if CMTimeCompare(pts, end) >= 0 { continue }
+                    // The decoder can hand back a near-duplicate frame at the cut point; keep one frame per slot.
+                    if let last = lastPTS, CMTimeCompare(CMTimeSubtract(pts, last), halfFrame) < 0 { continue }
+                    lastPTS = pts
                     guard let src = CMSampleBufferGetImageBuffer(sb), let pool = adaptor.pixelBufferPool else { continue }
                     var dstOpt: CVPixelBuffer?
                     CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dstOpt)
