@@ -109,7 +109,7 @@ final class WFAppFlowExportTests: XCTestCase {
         let model = try await loadedModel()
         model.export()
         try await WFWait.until("export to finish and wait for details") { model.exportFinishedWaiting }
-        XCTAssertEqual(hiddenLeftovers().count, 1)
+        XCTAssertEqual(WFScratch.ls(outDir).count, 0, "nothing appears in the output folder until it is saved")
         // Another volume when possible (the worktree may be on an external drive), else another folder.
         let worktree = dir!
         let other = worktree.appendingPathComponent(".wf-appflow-scratch-\(UUID().uuidString)", isDirectory: true)
@@ -140,7 +140,7 @@ final class WFAppFlowExportTests: XCTestCase {
         try await WFWait.until("save to fail") { if case .failed = model.exportState { return true }; return false }
         guard case .failed(let msg) = model.exportState else { return }
         XCTAssertTrue(msg.hasPrefix("Saving the file failed"), msg)
-        XCTAssertEqual(hiddenLeftovers().count, 1, "the finished export is not thrown away")
+        XCTAssertEqual(WFScratch.ls(outDir).count, 0, "still nothing in the folder; the finished export waits in staging")
 
         model.outputFolder = outDir
         model.submitDetails()

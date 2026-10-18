@@ -417,7 +417,8 @@ final class AppModel {
         player.pause()
         let fm = FileManager.default
         try? fm.createDirectory(at: outputFolder, withIntermediateDirectories: true)
-        let temp = outputFolder.appendingPathComponent(Self.tempPrefix + UUID().uuidString).appendingPathExtension(SermonNaming.fileExtension(for: url))
+        // Never stage inside the (possibly iCloud-synced) output folder — see SafeSave.
+        let temp = SafeSave.stagingURL(near: outputFolder, ext: SermonNaming.fileExtension(for: url))
         let engine = ExportEngine()
         self.engine = engine
         exportSource = url
@@ -440,7 +441,7 @@ final class AppModel {
                 if detailsSubmitted { await finalize() } else { exportState = .running(stage: "Waiting for sermon details", fraction: 1) }
             } catch {
                 self.engine = nil
-                try? FileManager.default.removeItem(at: temp)
+                try? FileManager.default.removeItem(at: temp.deletingLastPathComponent())
                 showDetailsSheet = false
                 if case ExportError.cancelled = error { exportState = .idle; return }
                 let e = ErrorExplainer.explain(error, operation: "Export", input: url, outputFolder: temp.deletingLastPathComponent())
@@ -485,7 +486,7 @@ final class AppModel {
         }
         let temp = result.outputURL
         let moveError: Error? = await Task.detached {
-            do { try FileManager.default.moveItem(at: temp, to: dest); return nil } catch { return error }
+            do { try SafeSave.move(temp, to: dest); return nil } catch { return error }
         }.value
         if let moveError {
             exportState = .failed(ErrorExplainer.explain(moveError, operation: "Saving the file", outputFolder: folder).message)
@@ -509,7 +510,7 @@ final class AppModel {
 
     func cancelExportFromSheet() {
         showDetailsSheet = false
-        if let r = finishedExport { try? FileManager.default.removeItem(at: r.outputURL); finishedExport = nil; exportState = .idle }
+        if let r = finishedExport { try? FileManager.default.removeItem(at: r.outputURL.deletingLastPathComponent()); finishedExport = nil; exportState = .idle }
         else { engine?.cancel() }
     }
 

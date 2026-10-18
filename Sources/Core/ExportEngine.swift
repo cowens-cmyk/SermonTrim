@@ -102,11 +102,18 @@ public final class ExportEngine: @unchecked Sendable {
         }
         stageProgress(0)
 
-        // Stage 2: assemble.
-        try? FileManager.default.removeItem(at: output)
+        // Stage 2: assemble into a staging file (outside iCloud), then move it into place.
+        let staged = SafeSave.stagingURL(near: output.deletingLastPathComponent(), ext: ext)
         let assembler = Assembler(asset: asset, info: info, plan: plan, envelope: envelope, segments: segments,
-                                  outputURL: output, fileType: ext == "mp4" ? .mp4 : .mov, cancel: cancelToken, sermon: sermon)
-        let assembleLog = try await assembler.run { f in progress(.init(stage: "Writing file", fraction: 0.25 + 0.75 * f)) }
+                                  outputURL: staged, fileType: ext == "mp4" ? .mp4 : .mov, cancel: cancelToken, sermon: sermon)
+        let assembleLog: [String]
+        do {
+            assembleLog = try await assembler.run { f in progress(.init(stage: "Writing file", fraction: 0.25 + 0.75 * f)) }
+            try SafeSave.move(staged, to: output)
+        } catch {
+            try? FileManager.default.removeItem(at: staged.deletingLastPathComponent())
+            throw error
+        }
         log.append(contentsOf: assembleLog)
         progress(.init(stage: "Done", fraction: 1))
 

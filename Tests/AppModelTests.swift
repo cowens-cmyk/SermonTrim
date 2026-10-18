@@ -164,7 +164,7 @@ final class SermonFlowTests: XCTestCase {
         let model = try await loadedModel()
         model.export()
         try await waitUntilExportFinishedWaiting(model)
-        XCTAssertEqual(hiddenLeftovers().count, 1, "waits as a hidden temp file")
+        XCTAssertEqual(((try? FileManager.default.contentsOfDirectory(atPath: outDir.path)) ?? []).count, 0, "waits in staging, not in the (possibly iCloud) output folder")
         model.sermonTitle = "Grace Upon Grace"
         model.sermonDate = SermonNaming.gregorian.date(from: DateComponents(year: 2026, month: 10, day: 11))!
         model.speaker = "Will, Rick"

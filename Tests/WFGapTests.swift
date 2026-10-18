@@ -55,13 +55,14 @@ final class WFCancelCleanupTests: XCTestCase {
             _ = try await engine.export(source: src, output: out,
                                         spec: TrimSpec(inTime: CMTime(seconds: 1, preferredTimescale: 600), outTime: CMTime(seconds: 58, preferredTimescale: 600),
                                                        start: .none, end: Transition(kind: .fadeBlack, duration: 2))) { prog in
-                // Cancel only once the final file exists and is being written.
-                if prog.stage == "Writing file", FileManager.default.fileExists(atPath: out.path) { sawWriting.set(true); engine.cancel() }
+                // Cancel partway through writing the final file (it's written in staging, then moved in).
+                if prog.stage == "Writing file", prog.fraction > 0.4, prog.fraction < 0.95 { sawWriting.set(true); engine.cancel() }
             }
             XCTFail("export should have been cancelled")
         } catch ExportError.cancelled {
             XCTAssertTrue(sawWriting.get(), "cancel happened during the write stage")
-            XCTAssertFalse(FileManager.default.fileExists(atPath: out.path), "partial output removed")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: out.path), "no partial output")
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["src.mp4"], "nothing left next to the source")
         }
     }
 }
@@ -71,4 +72,21 @@ final class Locked<T>: @unchecked Sendable {
     init(_ v: T) { self.v = v }
     func get() -> T { lock.lock(); defer { lock.unlock() }; return v }
     func set(_ n: T) { lock.lock(); v = n; lock.unlock() }
+}
+
+final class SafeSaveTests: XCTestCase {
+    func testStagingIsOutsideTheDestinationAndMoveLandsTheFinalName() throws {
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent("wf-safesave-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dest) }
+        let staged = SafeSave.stagingURL(near: dest, ext: "mp4")
+        XCTAssertNotEqual(staged.deletingLastPathComponent().standardizedFileURL, dest.standardizedFileURL, "never staged inside the output folder")
+        try Data(repeating: 7, count: 1024).write(to: staged)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dest.path), [], "nothing visible in the destination while writing")
+        let final = dest.appendingPathComponent("The Lord Sees (10.4.26).mp4")
+        try SafeSave.move(staged, to: final)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dest.path), ["The Lord Sees (10.4.26).mp4"])
+        XCTAssertEqual(try Data(contentsOf: final).count, 1024)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.deletingLastPathComponent().path), "staging folder cleaned up")
+    }
 }
