@@ -10,7 +10,14 @@ BUILD=$(( $(grep -E '^ *CURRENT_PROJECT_VERSION:' project.yml | head -1 | tr -dc
 sed -i '' -E "s/MARKETING_VERSION: .*/MARKETING_VERSION: \"$V\"/; s/CURRENT_PROJECT_VERSION: .*/CURRENT_PROJECT_VERSION: \"$BUILD\"/" project.yml
 xcodegen generate
 xcodebuild -project SermonTrim.xcodeproj -scheme SermonTrim -configuration Release -derivedDataPath build build | tail -1
-./Scripts/make_dmg.sh "build/Build/Products/Release/Sermon Trim.app"
+APP="build/Build/Products/Release/Sermon Trim.app"
+if xcrun notarytool history --keychain-profile "${NOTARY_PROFILE:-sermontrim-notary}" >/dev/null 2>&1; then
+  ./Scripts/sign_notarize.sh "$APP"          # Developer ID + notarized + stapled
+else
+  echo "⚠️  No notary credential saved — publishing an ad-hoc signed (not notarized) build."
+  echo "    Run once:  xcrun notarytool store-credentials \"sermontrim-notary\" --team-id TCAQTA64TB"
+  ./Scripts/make_dmg.sh "$APP"
+fi
 git add -A
 git diff --cached --quiet || git commit -m "Release $V" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git tag "v$V"
