@@ -197,7 +197,8 @@ final class WFDetectionSnapTests: XCTestCase {
         let tr = sc.transcript(duration: t + 200)
         let first = try XCTUnwrap(MarkerDetector.heuristicCandidates(transcript: tr, settings: MarkerSettings()).starts.first)
         XCTAssertEqual(first.time, sermonStart, accuracy: 0.01)
-        XCTAssertTrue(first.reason.contains("start of this stretch of speech"), first.reason)
+        // Found either by snapping back from the scripture line or directly from the jump in speech density.
+        XCTAssertTrue(first.reason.contains("start of this stretch of speech") || first.reason.contains("speech gets much denser here"), first.reason)
 
         // And directly: a hand-made candidate at the scripture reading snaps to exactly the sermon start.
         let snapped = MarkerDetector.snapStarts([candidate(scripture, score: 5)], sentences: tr.sentences, settings: MarkerSettings())
@@ -237,8 +238,8 @@ final class WFDetectionStartTests: XCTestCase {
 
     func testEightSecondGapScoresMoreAndSaysSo() {
         let c = starts(welcomeGap: 8).first { abs($0.time - 108.5) < 0.01 }
-        XCTAssertEqual(c?.score ?? -1, 4, accuracy: 1e-9)
-        XCTAssertEqual(c?.reason, "says “welcome”, follows 8 s of quiet/music")
+        XCTAssertEqual(c?.score ?? -1, 7, accuracy: 1e-9)    // 4 + 3 for following the "Amen." by 8 s
+        XCTAssertEqual(c?.reason, "says “welcome”, follows 8 s of quiet/music; follows a prayer’s “amen”")
     }
 
     func testStartsAfter70PercentAreIgnored() {
@@ -277,6 +278,32 @@ final class WFDetectionStartTests: XCTestCase {
         XCTAssertEqual(first.time, sermon, accuracy: 0.01)
         XCTAssertTrue(first.reason.contains("be seated"), first.reason)
         XCTAssertTrue(d.starts.contains { abs($0.time - announcements) < 0.01 }, "announcements should remain an alternate")
+    }
+
+    /// Youth service shape: an early activity talk, worship, a short prayer ending in "amen", a pause, then a sermon with
+    /// no start phrase in its first line and a scripture reading mid-way. Previously the mid-sermon scripture reading won.
+    func testSermonAfterPrayerBeatsMidSermonScriptureAndEarlyActivity() throws {
+        var sc = WFScript()
+        var t = sc.repeatLine("Here's what I'm gonna have y'all do grab a partner and find a seat.", from: 600, until: 600 + 5 * 60)
+        // Worship: a few lyric lines a minute for 20 minutes.
+        var song = t + 20
+        while song < t + 20 * 60 { song = sc.say("The Lord is with me ever present.", at: song) + 6 }
+        t = sc.say("Let's pray. Father we love you. Speak through Logan tonight. In the mighty name of Jesus. Amen.", at: song + 5)
+        let sermon = t + 28
+        t = sc.say("All right.", at: sermon)
+        t = sc.repeatLine(sermonLine, from: t + 1, until: sermon + 15 * 60)
+        let scripture = t + 9
+        t = sc.say("Now I want you to see this in Luke chapter 1 verse 5 it says this.", at: scripture)
+        t = sc.repeatLine(sermonLine, from: t, until: sermon + 39 * 60)
+        t = sc.say("In Jesus name we pray. Amen.", at: t + 0.3)
+        let tr = sc.transcript(duration: t + 12 * 60)
+        let d = MarkerDetector.heuristicCandidates(transcript: tr, settings: settings)
+        let first = try XCTUnwrap(d.starts.first)
+        XCTAssertEqual(first.time, sermon, accuracy: 0.01, "\(d.starts.map { ($0.time, $0.score, $0.reason) })")
+        XCTAssertTrue(first.reason.contains("amen"), first.reason)
+        XCTAssertTrue(first.context.hasPrefix("All right."), first.context)
+        XCTAssertTrue(first.surrounding.hasSuffix("Amen."), first.surrounding)
+        if let mid = d.starts.first(where: { abs($0.time - scripture) < 1 }) { XCTAssertLessThan(mid.score, first.score - 3) }
     }
 }
 

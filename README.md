@@ -10,6 +10,28 @@ xcodebuild -project SermonTrim.xcodeproj -scheme SermonTrim -configuration Relea
 ```
 Or open `SermonTrim.xcodeproj` in Xcode and press Run. Requires macOS 26+ and Xcode 26+ (built with Xcode 27).
 Command-line harness: `smarttrim <file> <in> <out> --start black:0.5 --end black:3` (scheme `smarttrim`).
+
+## Automation
+Headless, with JSON on stdout (progress on stderr; exit 0 done, 1 failed, 2 bad arguments):
+```bash
+# Transcribe (cached) and suggest start/end. Each candidate has its time, sentence, the words before/after it and why.
+smarttrim detect "Service.mp4" --json [--no-ai] [--tail 5] [--fade-out black:3]
+# Export a trim. Timecodes use the video's own frame rate; MM:SS or seconds also work.
+smarttrim trim "Service.mp4" --in 00:44:01:20 --out 01:23:08:07 --fade-out black:3 \
+    -o "~/Desktop/(Students) Advent (11.18.26).mp4" [--overwrite] --json [--result result.json]
+```
+Without `--overwrite` an existing name gets " 2". The result lists the output path, duration, size, share re-encoded and
+elapsed time. Files are staged outside iCloud-synced folders and moved in when finished, like the app does.
+
+Opening the app on a video (the window loads it, applies the points, and can start auto-detect):
+```bash
+open -a "Sermon Trim" "Service.mp4"
+open "sermontrim://open?path=/Users/me/Desktop/Service.mp4&in=00:44:01:20&out=01:23:08:07&detect=1"
+"/Applications/Sermon Trim.app/Contents/MacOS/Sermon Trim" "Service.mp4" --in 44:01 --out 1:23:08 --detect
+```
+Controls carry stable accessibility identifiers (`in-timecode`, `out-timecode`, `set-in`, `set-out`, `trim-length`,
+`find-start-end`, `use-best-guess`, `transcript-search`, `transcript-line-<centiseconds>`, `play-pause`, `export`,
+`choose-video`). The In/Out and search fields accept AXValue and AXConfirm.
 Tests: `xcodebuild -project SermonTrim.xcodeproj -scheme SermonTrim test`.
 
 ## How the smart render works
@@ -34,7 +56,10 @@ in about 45 s (92 s with a simultaneous full decode check); the copied middle wa
 1. Audio is extracted and transcribed with Apple's `SpeechAnalyzer` (cached per file in Application Support).
 2. Phrase matching finds candidate starts ("good morning", "turn with me", "you may be seated"...) and ends ("amen",
    "in Jesus' name", "worship with us"...), weighted by gaps of silence/music and by sustained sermon-like speech.
-3. Apple's on-device language model (Foundation Models) picks the exact sentence around each candidate.
+   Starts also score for the shape of a service: sparse speech (songs, silence) turning into dense talk, the length of
+   the talk that follows compared with the longest in the file, and following a prayer's "amen" or "be seated".
+3. Apple's on-device language model (Foundation Models) picks the exact sentence around each candidate. It refines a
+   candidate but can't outrank a better one (it reports ~100% confidence for nearly everything).
 4. Suggestions are placed on the timeline as markers. Nothing is applied until you click **Use** / **Use best guess**.
    Out = last word + wait (default 5 s) + fade duration, so the fade starts after the quiet hold.
 Phrase lists and the wait time are editable in Settings (⌘,).

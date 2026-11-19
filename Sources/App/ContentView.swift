@@ -44,16 +44,16 @@ struct ContentView: View {
         .onChange(of: undoManager) { _, new in model.undoManager = new }
         .sheet(isPresented: $model.showBatch) { BatchView().environment(model) }
         .sheet(isPresented: $model.showDetailsSheet) { SermonDetailsSheet().environment(model).interactiveDismissDisabled() }
-        .onKeyPress(.space) { guard model.hasFile, !Self.isTyping else { return .ignored }; model.togglePlay(); return .handled }
+        .onKeyPress(.space) { guard model.hasFile, !typing else { return .ignored }; model.togglePlay(); return .handled }
         .onKeyPress(characters: CharacterSet(charactersIn: "iIoO"), phases: .down) { press in
-            guard model.hasFile, !Self.isTyping else { return .ignored }
+            guard model.hasFile, !typing else { return .ignored }
             if press.characters.lowercased() == "i" { model.setIn() } else { model.setOut() }
             return .handled
         }
-        .onKeyPress(.leftArrow) { model.hasFile && !Self.isTyping ? { model.step(frames: -1); return .handled }() : .ignored }
-        .onKeyPress(.rightArrow) { model.hasFile && !Self.isTyping ? { model.step(frames: 1); return .handled }() : .ignored }
+        .onKeyPress(.leftArrow) { model.hasFile && !typing ? { model.step(frames: -1); return .handled }() : .ignored }
+        .onKeyPress(.rightArrow) { model.hasFile && !typing ? { model.step(frames: 1); return .handled }() : .ignored }
         .onKeyPress(characters: CharacterSet(charactersIn: ",."), phases: .down) { press in
-            guard model.hasFile, !Self.isTyping else { return .ignored }
+            guard model.hasFile, !typing else { return .ignored }
             model.jump(seconds: press.characters == "," ? -1 : 1)
             return .handled
         }
@@ -67,10 +67,16 @@ struct ContentView: View {
 }
 
 extension ContentView {
+    var typing: Bool { model.typingInField || Self.isTyping }
+
     /// True while a text field (title, timecodes, search…) has the keyboard, so shortcuts don't steal typing.
+    /// Checks the window the key event was sent to, not only the key window: when keys are delivered to the app in
+    /// the background (automation, remote control) there is no key window and the old check said "not typing".
     static var isTyping: Bool {
-        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
-        return responder is NSText || NSApp.keyWindow?.attachedSheet != nil || NSApp.modalWindow != nil
+        if NSApp.modalWindow != nil { return true }
+        let candidates = [NSApp.currentEvent?.window, NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 }
+        let windows = candidates.isEmpty ? NSApp.windows.filter { $0.isVisible } : candidates
+        return windows.contains { $0.firstResponder is NSText || $0.attachedSheet != nil }
     }
 }
 
@@ -89,6 +95,7 @@ struct WelcomeView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Choose Video…") { model.openPanel() }
+                .accessibilityIdentifier("choose-video")
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
         }

@@ -14,6 +14,7 @@ public struct MarkerSettings: Codable, Equatable, Sendable {
         "good morning", "good evening", "welcome", "open your bible", "open up your bible", "open your bibles", "turn with me",
         "turn to", "if you have a bible", "let's pray", "let us pray", "father god", "heavenly father", "this morning we",
         "today we", "let's open", "scripture", "chapter", "you may be seated", "have a seat", "be seated",
+        "new series", "starting a new", "tonight we", "this evening we", "let me start",
     ]
     public init() {}
 }
@@ -26,6 +27,8 @@ public struct MarkerCandidate: Identifiable, Sendable, Hashable {
     public var reason: String
     public var context: String
     public var source: Source
+    /// Up to 30 words said in the minute before a start (or after an end), to judge the cut.
+    public var surrounding: String = ""
 }
 
 public struct DetectedMarkers: Sendable {
@@ -44,7 +47,25 @@ public enum MarkerDetector {
         guard !sentences.isEmpty else { result.notes.append("The transcript is empty."); return result }
         result.starts = startCandidates(sentences: sentences, transcript: transcript, settings: settings)
         result.ends = endCandidates(sentences: sentences, transcript: transcript, settings: settings)
-        return result
+        return annotate(result, transcript: transcript)
+    }
+
+    /// Makes each candidate's text match its final time: what is said from a start (or up to an end) plus the
+    /// 20 s on the other side of the cut.
+    static func annotate(_ d: DetectedMarkers, transcript: Transcript) -> DetectedMarkers {
+        var out = d
+        let sentences = transcript.sentences
+        for k in out.starts.indices {
+            let t = out.starts[k].time
+            if let i = sentences.firstIndex(where: { $0.end > t + 0.05 }) { out.starts[k].context = contextText(sentences, around: i, before: 0, after: 2) }
+            out.starts[k].surrounding = transcript.words.filter { $0.end <= t + 0.05 && $0.start >= t - 60 }.suffix(30).map(\.text).joined(separator: " ")
+        }
+        for k in out.ends.indices {
+            let t = out.ends[k].time
+            if let i = sentences.lastIndex(where: { $0.start < t - 0.05 }) { out.ends[k].context = contextText(sentences, around: i, before: 2, after: 0) }
+            out.ends[k].surrounding = transcript.words.filter { $0.start >= t - 0.05 && $0.end <= t + 60 }.prefix(30).map(\.text).joined(separator: " ")
+        }
+        return out
     }
 
     private static func contains(_ text: String, any phrases: [String]) -> [String] {
@@ -55,6 +76,7 @@ public enum MarkerDetector {
     static func startCandidates(sentences: [Transcript.Sentence], transcript: Transcript, settings: MarkerSettings) -> [MarkerCandidate] {
         var scored: [MarkerCandidate] = []
         let limit = transcript.duration * 0.7
+        let profile = SpeechProfile(transcript)
         for (i, s) in sentences.enumerated() where s.start <= limit {
             var score = 0.0
             var reasons: [String] = []
@@ -71,8 +93,16 @@ public enum MarkerDetector {
             if following >= 220 { score += 2; reasons.append("continuous speech follows") }
             else if following >= 140 { score += 1 }
             if i == 0 { score += 1 }
-            guard score >= 3 else { continue }
+            // A sermon starts where sparse speech (songs, silence) turns into a long, dense run of one person talking.
+            // Not credited when a closing line ("amen", "be seated") follows within a minute: that's the intro or the
+            // opening prayer, and the message begins after it.
+            let closesSoon = sentences[i...].prefix { $0.start < s.start + 60 }.contains { !contains($0.text, any: settings.transitionPhrases).isEmpty }
+            let contrast = closesSoon ? 0 : profile.contrast(at: s.start)
+            guard score + contrast >= 3 else { continue }
             score += startBonus(transcript, at: s.start)
+            if contrast > 0.5 { score += contrast; reasons.append("speech gets much denser here") }
+            let run = closesSoon ? 0 : profile.sustainedRunBonus(at: s.start)
+            if run > 0 { score += run; if run >= 2 { reasons.append("starts a long stretch of talking") } }
             scored.append(MarkerCandidate(time: s.start, score: score, reason: reasons.joined(separator: ", "),
                                           context: contextText(sentences, around: i, before: 1, after: 3), source: .phrases))
         }
@@ -145,6 +175,9 @@ public enum MarkerDetector {
                 if ["be seated", "have a seat", "dismissed"].contains(where: { before.contains($0) }) {
                     c.score += 4
                     c.reason += (c.reason.isEmpty ? "" : "; ") + "follows “be seated / dismissed”"
+                } else if ["amen", "in jesus' name", "in jesus name"].contains(where: { before.replacingOccurrences(of: "’", with: "'").contains($0) }) {
+                    c.score += 3
+                    c.reason += (c.reason.isEmpty ? "" : "; ") + "follows a prayer’s “amen”"
                 }
             }
             if let k = out.firstIndex(where: { abs($0.time - c.time) < 1 }) {
@@ -174,6 +207,64 @@ public enum MarkerDetector {
         return before - (after > 140 ? 1.5 : 0)
     }
 
+    /// Word counts per second, so speech density over any window is O(1).
+    struct SpeechProfile {
+        private var prefix: [Int]       // prefix[i] = words starting before second i
+        let duration: Double
+        private(set) var threshold = 60.0
+        private(set) var longestRun = 0.0
+
+        init(_ t: Transcript) {
+            duration = t.duration
+            let n = max(1, Int(t.duration.rounded(.up)) + 1)
+            var counts = [Int](repeating: 0, count: n + 1)
+            for w in t.words { counts[min(n, max(0, Int(w.start) + 1))] += 1 }
+            for i in 1...n { counts[i] += counts[i - 1] }
+            prefix = counts
+            // "Talking" = at least 60% of the file's busy pace (90th percentile of minute-long windows).
+            let rates = stride(from: 0.0, to: max(0, duration - 60), by: 30).map { rate(from: $0, to: $0 + 60) }.sorted()
+            if !rates.isEmpty { threshold = max(60, rates[Int(Double(rates.count - 1) * 0.9)] * 0.6) }
+            longestRun = stride(from: 0.0, to: duration, by: 30).map { runLength(from: $0) }.max() ?? 0
+        }
+
+        func words(from a: Double, to b: Double) -> Int {
+            let n = prefix.count - 1
+            let lo = min(n, max(0, Int(a.rounded()))), hi = min(n, max(0, Int(b.rounded())))
+            return hi > lo ? prefix[hi] - prefix[lo] : 0
+        }
+
+        /// Words per minute in [a, b), clipped to the file.
+        func rate(from a: Double, to b: Double) -> Double {
+            let lo = max(0, a), hi = min(b, duration)
+            guard hi - lo >= 5 else { return 0 }
+            return Double(words(from: lo, to: hi)) / ((hi - lo) / 60)
+        }
+
+        /// How long continuous talking lasts from `t`: minute windows every 30 s, ending after 90 s below the threshold.
+        func runLength(from t: Double) -> Double {
+            guard rate(from: t, to: t + 60) >= threshold else { return 0 }
+            var end = t, misses = 0, k = 0.0
+            while t + k * 30 < duration {
+                let a = t + k * 30
+                if rate(from: a, to: a + 60) >= threshold { end = min(duration, a + 60); misses = 0 } else { misses += 1; if misses >= 3 { break } }
+                k += 1
+            }
+            return end - t
+        }
+
+        /// 0...3: the next 5 minutes are much denser than the previous 3 (singing or silence turning into a talk).
+        func contrast(at t: Double) -> Double {
+            let before = rate(from: t - 180, to: t), after = min(rate(from: t, to: t + 60), rate(from: t, to: t + 300))
+            return min(3, max(0, (after - before - 40) / 25))
+        }
+
+        /// 0...4: how close the talk starting here comes to the longest talk in the file (the sermon is usually the longest).
+        func sustainedRunBonus(at t: Double) -> Double {
+            guard longestRun >= 5 * 60 else { return 0 }
+            return 4 * min(1, runLength(from: t) / longestRun)
+        }
+    }
+
     // MARK: On-device AI refinement
 
     public static var aiAvailable: Bool { SystemLanguageModel.default.availability == .available }
@@ -196,18 +287,19 @@ public enum MarkerDetector {
 
         for c in detected.starts.prefix(4) {
             if var r = await ask(kind: .start, near: c, sentences: sentences) {
+                // The model says 100% for almost everything, so it only refines a candidate; it can't outrank a better one.
+                r.score = c.score + r.score
                 // If a greeting that begins this stretch of speech sits just before the AI's pick, start there.
                 if let greet = detected.starts.first(where: { $0.time < r.time && r.time - $0.time <= 25 }) {
                     r.time = greet.time
                     r.reason += "; includes the opening greeting"
                 }
-                r.score += startBonus(transcript, at: r.time)
                 refinedStarts.append(r)
             }
         }
         for c in detected.ends.prefix(4) {
             if var r = await ask(kind: .end, near: c, sentences: sentences) {
-                r.score += endBonus(transcript, at: r.time)
+                r.score = c.score + r.score
                 refinedEnds.append(r)
             }
         }
@@ -215,7 +307,7 @@ public enum MarkerDetector {
         // AI answers go first (they carry a confidence-based score), phrase candidates remain as alternates.
         out.starts = dedupe(snapStarts(merge(ai: refinedStarts, phrases: detected.starts), sentences: sentences, settings: settings))
         out.ends = dedupe(merge(ai: refinedEnds, phrases: detected.ends))
-        return out
+        return annotate(out, transcript: transcript)
     }
 
     private static func dedupe(_ items: [MarkerCandidate]) -> [MarkerCandidate] {
@@ -256,7 +348,7 @@ public enum MarkerDetector {
             guard choice.sentenceNumber >= 1, choice.sentenceNumber <= window.count else { return nil }
             let s = window[choice.sentenceNumber - 1]
             let time = kind == .start ? s.start : s.end
-            return MarkerCandidate(time: time, score: 10 + choice.confidence * 5, reason: "AI picked this sentence (confidence \(Int(choice.confidence * 100))%)",
+            return MarkerCandidate(time: time, score: 1 + choice.confidence * 2, reason: "AI picked this sentence (confidence \(Int(choice.confidence * 100))%)",
                                    context: s.text, source: .ai)
         } catch {
             return nil
