@@ -181,7 +181,7 @@ final class WFAppFlowModelTests: XCTestCase {
 
     // MARK: cleanUpTempExports
 
-    func testCleanUpRemovesOnlyPrefixedTempFilesInTheOutputFolder() throws {
+    func testCleanUpRemovesOnlyPrefixedTempFilesInTheOutputFolder() async throws {
         let other = try WFScratch.make("model-other")
         defer { try? FileManager.default.removeItem(at: other) }
         let fm = FileManager.default
@@ -194,6 +194,7 @@ final class WFAppFlowModelTests: XCTestCase {
 
         // Building the model cleans its (saved) output folder.
         let m = AppModel()
+        await m.startupCleanup?.value    // runs in the background so a slow folder can't block launch
         XCTAssertEqual(WFScratch.ls(dir), keep.sorted())
         XCTAssertTrue(fm.fileExists(atPath: other.appendingPathComponent(temp1).path), "other folders are left alone")
 

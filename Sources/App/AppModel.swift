@@ -82,7 +82,10 @@ final class AppModel {
 
     init() {
         loadSettings()
-        cleanUpTempExports()
+        // Off the main thread: listing the export folder can wait on a macOS privacy prompt (Desktop access) or a
+        // slow network drive, and doing it here kept the window from ever appearing.
+        let folder = outputFolder
+        startupCleanup = Task.detached(priority: .utility) { Self.removeTempExports(in: folder) }
         statusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             let playing = p.timeControlStatus != .paused
             Task { @MainActor in self?.isPlaying = playing }
@@ -529,11 +532,16 @@ final class AppModel {
         NSSound(named: "Glass")?.play()
     }
 
+    /// The launch-time cleanup of the output folder (runs in the background).
+    @ObservationIgnored private(set) var startupCleanup: Task<Void, Never>?
+
     /// Leftovers from an export interrupted by quitting the app.
-    func cleanUpTempExports() {
+    func cleanUpTempExports() { Self.removeTempExports(in: outputFolder) }
+
+    nonisolated static func removeTempExports(in folder: URL) {
         let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(at: outputFolder, includingPropertiesForKeys: nil, options: []) else { return }
-        for f in items where f.lastPathComponent.hasPrefix(Self.tempPrefix) { try? fm.removeItem(at: f) }
+        guard let items = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: []) else { return }
+        for f in items where f.lastPathComponent.hasPrefix(tempPrefix) { try? fm.removeItem(at: f) }
     }
 
     func cancelExportFromSheet() {
