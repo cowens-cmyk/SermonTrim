@@ -15,6 +15,7 @@ struct ControlsPanel: View {
                         }
                         Text("Length \(formatTimecode(model.keptDuration, frameRate: model.frameRate))")
                             .font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("trim-length")
                     }
                     card("Start") {
                         TransitionPicker(kind: $model.startKind, duration: $model.startDuration, range: 0.25...3, label: "Fade in")
@@ -40,6 +41,8 @@ struct ControlsPanel: View {
             Button { model.step(frames: -1) } label: { Image(systemName: "chevron.left") }
                 .help("Back one frame (←)")
             Button { model.togglePlay() } label: { Image(systemName: model.isPlaying ? "pause.fill" : "play.fill").frame(width: 18) }
+                .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
+                .accessibilityIdentifier("play-pause")
                 .buttonStyle(.glassProminent)
                 .help("Play / pause (Space)")
             Button { model.step(frames: 1) } label: { Image(systemName: "chevron.right") }
@@ -68,8 +71,9 @@ struct ControlsPanel: View {
 
     private func pointEditor(_ name: String, value: Binding<Double>, action: @escaping () -> Void, key: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            TimecodeField(seconds: value, frameRate: model.frameRate)
+            TimecodeField(seconds: value, frameRate: model.frameRate, identifier: "\(name.lowercased())-timecode", label: "\(name) point")
             Button("Set \(name) (\(key))", action: action).buttonStyle(.glass).controlSize(.small)
+                .accessibilityIdentifier("set-\(name.lowercased())")
         }
     }
 }
@@ -98,25 +102,24 @@ struct TransitionPicker: View {
 }
 
 struct TimecodeField: View {
+    @Environment(AppModel.self) private var model
     @Binding var seconds: Double
     let frameRate: Double
+    var identifier = "timecode"
+    var label = "Timecode"
     @State private var text = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("00:00:00:00", text: $text)
-            .font(.system(.body, design: .monospaced))
-            .textFieldStyle(.roundedBorder)
+        NativeTextField(text: $text, placeholder: "00:00:00:00", style: .monospaced, identifier: identifier, label: label,
+                        onCommit: { typed in
+                            if let v = parseTimecode(typed, frameRate: frameRate) { seconds = v }
+                            return formatTimecode(seconds, frameRate: frameRate)
+                        },
+                        onEditingChanged: { model.typingInField = $0 })
             .frame(width: 120)
-            .focused($focused)
-            .onSubmit(commit)
-            .onChange(of: focused) { _, f in if !f { commit() } }
-            .onChange(of: seconds, initial: true) { _, v in if !focused { text = formatTimecode(v, frameRate: frameRate) } }
-    }
-
-    private func commit() {
-        if let v = parseTimecode(text, frameRate: frameRate) { seconds = v }
-        text = formatTimecode(seconds, frameRate: frameRate)
+            // Always mirror the model, also while the field has focus, so it never shows a stale typed value.
+            .onChange(of: seconds, initial: true) { _, v in text = formatTimecode(v, frameRate: frameRate) }
+            .onChange(of: frameRate) { _, r in text = formatTimecode(seconds, frameRate: r) }
     }
 }
 
@@ -146,6 +149,7 @@ struct ExportButton: View {
                 Text(msg).font(.footnote).foregroundStyle(.red).lineLimit(2).frame(maxWidth: 280, alignment: .trailing)
             }
             Button { model.export() } label: { Label("Export", systemImage: "square.and.arrow.up") }
+                .accessibilityIdentifier("export")
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
                 .disabled(model.isExporting)

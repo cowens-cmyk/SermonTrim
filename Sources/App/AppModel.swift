@@ -55,6 +55,8 @@ final class AppModel {
     var showInspector = true
     var bladeOpen = false
     var showBatch = false
+    /// True while one of the app's text fields is being edited, so single-key shortcuts leave the typing alone.
+    var typingInField = false
     var preflight: ExportEngine.Preflight?
 
     // Export
@@ -172,12 +174,38 @@ final class AppModel {
 
     // MARK: Opening
 
+    private var activeOpenPanel: NSOpenPanel?
+
+    /// Shows the Open panel without blocking: a modal `runModal()` froze the button's action (accessibility presses
+    /// failed with "cannot complete") and greyed out the menus while the panel was up.
     func openPanel() {
+        if let p = activeOpenPanel { p.makeKeyAndOrderFront(nil); return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie]
         panel.allowsMultipleSelection = false
         panel.message = "Choose a sermon video to trim"
-        if panel.runModal() == .OK, let u = panel.url { open(u) }
+        panel.identifier = NSUserInterfaceItemIdentifier("open-video-panel")
+        activeOpenPanel = panel
+        NSApp.activate()
+        panel.begin { [weak self] response in
+            MainActor.assumeIsolated {
+                self?.activeOpenPanel = nil
+                if response == .OK, let u = panel.url { self?.open(u) }
+            }
+        }
+    }
+
+    /// Opens a video handed over by Finder, a `sermontrim://` link, or launch arguments, then applies any In/Out
+    /// points (parsed with the video's own frame rate) and starts auto-detect if asked.
+    func handle(_ request: OpenRequest) {
+        Task {
+            await load(request.file, points: nil)
+            guard url == request.file else { return }
+            if let t = request.inText.flatMap({ parseTimecode($0, frameRate: frameRate) }) { setIn(t) }
+            if let t = request.outText.flatMap({ parseTimecode($0, frameRate: frameRate) }) { setOut(t) }
+            seek(to: inTime)
+            if request.detect { detect() }
+        }
     }
 
     func openBatchPanel() {
@@ -195,7 +223,7 @@ final class AppModel {
         Task { await load(url, points: points) }
     }
 
-    private func load(_ url: URL, points: (Double, Double)?) async {
+    func load(_ url: URL, points: (Double, Double)?) async {
         player.pause()
         loadError = nil
         exportState = .idle

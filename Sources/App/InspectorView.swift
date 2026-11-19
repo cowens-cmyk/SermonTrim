@@ -5,12 +5,19 @@ struct InspectorView: View {
     @State private var search = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Auto-detect").font(.title3.weight(.semibold))
-            Text("Transcribes the audio on this Mac and suggests where the message starts and ends. Nothing leaves your computer.")
-                .font(.footnote).foregroundStyle(.secondary)
-
-            detectSection
+        VStack(alignment: .leading, spacing: 12) {
+            // The suggestions scroll on their own, so the transcript below always keeps room, even in a short window.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Auto-detect").font(.title3.weight(.semibold))
+                    Text("Transcribes the audio on this Mac and suggests where the message starts and ends. Nothing leaves your computer.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    detectSection
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 120, maxHeight: .infinity)
+            .layoutPriority(1)
 
             Divider()
             HStack {
@@ -19,8 +26,14 @@ struct InspectorView: View {
                 if let t = model.transcript { Text("\(t.words.count) words").font(.caption).foregroundStyle(.secondary) }
             }
             if model.transcript != nil {
-                TextField("Search transcript", text: $search).textFieldStyle(.roundedBorder)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    NativeTextField(text: $search, placeholder: "Search transcript", identifier: "transcript-search", label: "Search transcript",
+                                    onEditingChanged: { model.typingInField = $0 })
+                }
                 TranscriptList(search: search)
+                    .frame(minHeight: 200, maxHeight: .infinity)
+                    .layoutPriority(1)
             } else {
                 Text("No transcript yet.").foregroundStyle(.secondary).font(.footnote)
                 Spacer()
@@ -35,6 +48,7 @@ struct InspectorView: View {
         case .idle:
             Button { model.detect() } label: { Label(model.transcript == nil ? "Find start & end" : "Find start & end (use saved transcript)", systemImage: "wand.and.stars") }
                 .buttonStyle(.glassProminent)
+                .accessibilityIdentifier("find-start-end")
         case .working(let stage, let f):
             VStack(alignment: .leading, spacing: 6) {
                 if let f { ProgressView(value: f) } else { ProgressView().controlSize(.small) }
@@ -47,6 +61,7 @@ struct InspectorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Button { model.applyBestGuess() } label: { Label("Use best guess for start and end", systemImage: "checkmark.circle") }
                     .buttonStyle(.glassProminent)
+                    .accessibilityIdentifier("use-best-guess")
                 HStack {
                     Text("Wait after the last word")
                     Stepper(value: Bindable(model).tailSeconds, in: 0...20, step: 1) { Text("\(Int(model.tailSeconds)) s").monospacedDigit() }
@@ -73,6 +88,11 @@ struct InspectorView: View {
                             .background(.quaternary, in: .capsule)
                         Spacer()
                         Button("Use") { apply(c) }.buttonStyle(.glass).controlSize(.small)
+                            .accessibilityLabel("Use \(isStart ? "start" : "end") \(formatTimecode(c.time, frameRate: model.frameRate))")
+                    }
+                    if !c.surrounding.isEmpty {
+                        Text((isStart ? "Before: …" : "After: ") + c.surrounding + (isStart ? "" : "…"))
+                            .font(.caption).foregroundStyle(.tertiary).lineLimit(2)
                     }
                     Text(c.context).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                     if !c.reason.isEmpty { Text(c.reason).font(.caption2).foregroundStyle(.tertiary) }
@@ -89,26 +109,42 @@ struct TranscriptList: View {
     let search: String
 
     var body: some View {
-        let sentences = (model.transcript?.sentences ?? []).filter { search.isEmpty || $0.text.localizedCaseInsensitiveContains(search) }
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(sentences.enumerated()), id: \.offset) { i, s in
-                        let active = model.currentTime >= s.start && model.currentTime < s.end + 0.3
-                        Button { model.player.pause(); model.seek(to: s.start) } label: {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(MarkerDetector.clock(s.start)).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-                                Text(s.text).font(.callout).multilineTextAlignment(.leading)
-                            }
-                            .padding(.vertical, 3).padding(.horizontal, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(active ? AnyShapeStyle(Color.accentColor.opacity(0.18)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .id(i)
-                    }
-                }
+        let all = model.transcript?.sentences ?? []
+        let query = search.trimmingCharacters(in: .whitespaces)
+        let sentences = all.filter { query.isEmpty || $0.text.localizedCaseInsensitiveContains(query) }
+        let now = model.currentTime
+        let active = sentences.firstIndex { now >= $0.start && now < $0.end + 0.3 }
+        ScrollView {
+            if !query.isEmpty && sentences.isEmpty {
+                Text("No lines contain “\(query)”.").font(.footnote).foregroundStyle(.secondary).padding(6)
             }
+            // A filtered list is short, so build every row (all of them reach the accessibility tree); the full
+            // transcript stays lazy for speed.
+            if query.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 2) { rows(sentences, active: active) }
+            } else {
+                VStack(alignment: .leading, spacing: 2) { rows(Array(sentences.prefix(400)), active: active) }
+            }
+        }
+        .accessibilityIdentifier("transcript-list")
+        .accessibilityLabel(query.isEmpty ? "Transcript, \(all.count) lines" : "Transcript, \(sentences.count) lines containing \(query)")
+    }
+
+    @ViewBuilder private func rows(_ sentences: [Transcript.Sentence], active: Int?) -> some View {
+        ForEach(Array(sentences.enumerated()), id: \.offset) { i, s in
+            Button { model.player.pause(); model.seek(to: s.start) } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(MarkerDetector.clock(s.start)).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    Text(s.text).font(.callout).multilineTextAlignment(.leading)
+                }
+                .padding(.vertical, 3).padding(.horizontal, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(i == active ? AnyShapeStyle(Color.accentColor.opacity(0.18)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(MarkerDetector.clock(s.start)) \(s.text)")
+            .accessibilityHint("Moves the playhead here")
+            .accessibilityIdentifier("transcript-line-\(Int(s.start * 100))")
         }
     }
 }
